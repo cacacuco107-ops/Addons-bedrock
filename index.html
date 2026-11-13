@@ -54,9 +54,9 @@ textarea{resize:vertical}.prompt{min-height:150px}.row{display:flex;gap:8px}.row
 <div><label for="model-select">Modelo elegido automáticamente</label><input id="model-select" type="text" readonly placeholder="Se elige solo al generar, o pulsa el botón"><button class="secondary full" type="button" id="refresh-models">Buscar el mejor modelo de mi API</button><div class="tip" id="model-explanation">Consulta el catálogo de tu cuenta y elige un modelo general compatible. La selección es heurística, no una prueba de rendimiento.</div></div>
 </div>
 <label for="prompt">Describe tu addon</label><textarea id="prompt" class="prompt" placeholder="Ejemplo: crea un addon con aldeanos que tengan animaciones al caminar, trabajar y saludar."></textarea>
-<div id="gemini-key-setup" class="validation-box hidden" style="margin-top:14px">
+<div id="gemini-key-setup" class="validation-box" style="margin-top:14px">
  <h3>🔊 Gemini TTS: clave API necesaria para generar voces</h3>
- <div class="tip">Esta sección solo aparece cuando tu solicitud pide voces, diálogos hablados o sonidos. Si el addon no necesita audio, Gemini no se utiliza.</div>
+ <div class="tip">Opcional: solo se usa si generas voces. Si el addon no necesita audio, Gemini no se utiliza.</div>
  <label for="gemini-api-key-generator" style="margin-top:12px">Clave API de Gemini (Google AI Studio)</label>
  <div class="row"><input id="gemini-api-key-generator" type="password" autocomplete="off" placeholder="Pega aquí tu clave API de Gemini"><button class="secondary" id="toggle-gemini-generator" type="button">Mostrar</button></div>
  <div class="actions"><button class="success" id="save-gemini-generator" type="button">Guardar API de Gemini</button><button class="danger" id="delete-gemini-generator" type="button">Borrar API de Gemini</button></div>
@@ -72,7 +72,7 @@ textarea{resize:vertical}.prompt{min-height:150px}.row{display:flex;gap:8px}.row
 <div id="validation-report" class="validation-box hidden" aria-live="polite"></div>
 <div id="pack-choice-wrap" class="pack-select hidden"><label for="pack-choice">Pack que quieres exportar como .mcpack</label><select id="pack-choice"></select><div class="tip">Si tu addon tiene Behavior Pack y Resource Pack, exporta cada uno por separado como .mcpack o descarga el conjunto como .mcaddon.</div></div>
 
-<div class="validation-box hidden" id="tts-panel" style="margin-top:22px">
+<div class="validation-box" id="tts-panel" style="margin-top:22px">
  <h3>🔊 Voces reales para los diálogos (Gemini TTS)</h3>
  <div class="tip">Gemini genera audio; el generador lo convierte a OGG Vorbis y lo agrega al Resource Pack. Cada línea consume una solicitud de audio. Necesitas una clave Gemini con acceso a TTS.</div>
  <label for="gemini-api-key" style="margin-top:14px">Clave API de Gemini</label>
@@ -137,13 +137,13 @@ async function generateDialoguesInBatches(key,description,total){
 
 function requestNeedsAudio(text){return /\baudios?\b|\bsonidos?\b|\bvoz\b|\bvoces\b|di[aá]logos? hablados?|locuci[oó]n|voice.?over|\btts\b|\.ogg|\.wav|\.mp3/i.test(String(text||''));}
 function projectHasAudio(){return Object.keys(addonFiles).some(p=>/\.(ogg|wav|mp3)$/i.test(p)||/sound_definitions|villager_voice_map/i.test(p));}
-function updateTtsVisibility(show){$('tts-panel').classList.toggle('hidden',!show);}
+function updateTtsVisibility(){$('tts-panel').classList.remove('hidden');}
 
 try{projects=JSON.parse(localStorage.getItem('bedrock_projects')||'[]');if(!Array.isArray(projects))projects=[]}catch{projects=[]}
 function persistProjects(){try{localStorage.setItem('bedrock_projects',JSON.stringify(projects));return true}catch{return false}}
 const savedKey=localStorage.getItem('bedrock_api_key');if(savedKey)$('api-key').value=savedKey;
 const savedGeminiKey=localStorage.getItem('bedrock_gemini_api_key');if(savedGeminiKey){$('gemini-api-key').value=savedGeminiKey;$('gemini-api-key-generator').value=savedGeminiKey;}
-$('prompt').addEventListener('input',()=>{$('gemini-key-setup').classList.toggle('hidden',!requestNeedsAudio($('prompt').value));});
+
 $('toggle-gemini-generator').onclick=()=>{const el=$('gemini-api-key-generator');el.type=el.type==='password'?'text':'password';$('toggle-gemini-generator').textContent=el.type==='password'?'Mostrar':'Ocultar'};
 $('save-gemini-generator').onclick=()=>{const k=$('gemini-api-key-generator').value.trim();if(!k)return alert('Pega primero tu clave de Gemini.');localStorage.setItem('bedrock_gemini_api_key',k);$('gemini-api-key').value=k;showStatus('status','Clave API de Gemini guardada. Solo se usará si el addon necesita audio.','good')};
 $('delete-gemini-generator').onclick=()=>{localStorage.removeItem('bedrock_gemini_api_key');$('gemini-api-key-generator').value='';$('gemini-api-key').value='';showStatus('status','Clave API de Gemini eliminada.','good')};
@@ -421,7 +421,7 @@ $('save-project').onclick=()=>{
  renderProjects();
  showStatus('editor-status',skipped?`Proyecto guardado. Los ${skipped} audios no se guardan en el navegador: descarga el paquete para conservarlos.`:'Proyecto guardado en este navegador.','good');
 };
-$('back').onclick=()=>{saveCurrent(false);editor.style.display='none';generator.style.display='block';$('gemini-key-setup').classList.toggle('hidden',!requestNeedsAudio($('prompt').value));hideStatus('editor-status')};
+$('back').onclick=()=>{saveCurrent(false);editor.style.display='none';generator.style.display='block';hideStatus('editor-status')};
 function getManifestEntries(){return Object.keys(addonFiles).filter(p=>p.toLowerCase().split('/').pop()==='manifest.json').sort()}
 function refreshPackChoices(){const manifests=getManifestEntries(),wrap=$('pack-choice-wrap'),sel=$('pack-choice');sel.innerHTML='';manifests.forEach(path=>{const o=document.createElement('option');o.value=path;o.textContent=path;sel.appendChild(o)});wrap.classList.toggle('hidden',manifests.length<2)}
 function addIssue(list,type,message){list.push({type,message})}
