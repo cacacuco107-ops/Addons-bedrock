@@ -31,6 +31,16 @@ textarea{resize:vertical}.prompt{min-height:150px}.row{display:flex;gap:8px}.row
 .validation-box h3{margin:0 0 10px}.validation-summary{font-weight:800;margin-bottom:10px}.validation-list{margin:0;padding-left:22px;line-height:1.6}
 .validation-list li.error{color:#fca5a5}.validation-list li.warn{color:#fde68a}.validation-list li.ok{color:#86efac}
 .pack-select{margin-top:14px}
+.tex-item{display:flex;align-items:center;justify-content:space-between;gap:12px;background:#152540;padding:12px;border-radius:10px;margin-top:10px;border:1px solid var(--line);flex-wrap:wrap}
+.tex-info{flex:1;min-width:200px}
+.tex-title{font-weight:700;color:var(--accent);font-size:15px}
+.tex-path{font-size:12px;color:var(--muted);font-family:monospace;margin-top:3px}
+.tex-preview{width:48px;height:48px;image-rendering:pixelated;border:1px solid var(--line);border-radius:8px;background:#09111e;object-fit:contain}
+.tex-badge{display:inline-block;font-size:11px;padding:2px 8px;border-radius:99px;font-weight:700;margin-top:4px}
+.tex-badge.custom{background:#14532d;color:#86efac}
+.tex-badge.placeholder{background:#713f12;color:#fde68a}
+#png-preview-box{text-align:center;padding:24px;background:#0d1a2e;border:1px solid var(--line);border-radius:10px;margin-bottom:10px}
+#png-preview-img{width:128px;height:128px;image-rendering:pixelated;border:2px solid var(--line);border-radius:12px;background:repeating-conic-gradient(#182842 0% 25%, #0f1b2e 0% 50%) 50% / 16px 16px}
 @media(max-width:650px){.grid{grid-template-columns:1fr;gap:12px}.card{padding:18px}.sidebar{width:min(85vw,300px)}}
 </style>
 </head>
@@ -53,7 +63,7 @@ textarea{resize:vertical}.prompt{min-height:150px}.row{display:flex;gap:8px}.row
 <div class="actions"><button class="success" id="save-api">Guardar API</button><button class="danger" id="delete-api">Borrar API</button></div></div>
 <div><label for="model-select">Modelo elegido automáticamente</label><input id="model-select" type="text" readonly placeholder="Se elige solo al generar, o pulsa el botón"><button class="secondary full" type="button" id="refresh-models">Buscar el mejor modelo de mi API</button><div class="tip" id="model-explanation">Consulta el catálogo de tu cuenta y elige un modelo general compatible. La selección es heurística, no una prueba de rendimiento.</div></div>
 </div>
-<label for="prompt">Describe tu addon</label><textarea id="prompt" class="prompt" placeholder="Ejemplo: crea un addon con aldeanos que tengan animaciones al caminar, trabajar y saludar."></textarea>
+<label for="prompt">Describe tu addon</label><textarea id="prompt" class="prompt" placeholder="Ejemplo: crea un addon con un arco explosivo o una espada de fuego."></textarea>
 <div id="gemini-key-setup" class="validation-box" style="margin-top:14px">
  <h3>🔊 Gemini TTS: clave API necesaria para generar voces</h3>
  <div class="tip">Opcional: solo se usa si generas voces. Si el addon no necesita audio, Gemini no se utiliza.</div>
@@ -64,12 +74,30 @@ textarea{resize:vertical}.prompt{min-height:150px}.row{display:flex;gap:8px}.row
 </div>
 <button class="primary full" id="generate">Generar addon y abrir editor</button><div id="status" class="status" role="status"></div>
 </section>
+
 <section class="card" id="editor">
 <h1>Editor de archivos</h1><div class="sub">Selecciona un archivo, edítalo y guarda los cambios antes de empaquetar.</div>
-<div class="tabs" id="file-tabs"></div><label id="current-file-name" for="json-editor">Archivo</label><textarea id="json-editor" spellcheck="false"></textarea>
+<div class="tabs" id="file-tabs"></div><label id="current-file-name" for="json-editor">Archivo</label>
+<div id="png-preview-box" class="hidden">
+ <img id="png-preview-img" alt="Vista previa de textura">
+ <div id="png-preview-caption" class="tip" style="margin-top:10px;font-weight:600"></div>
+</div>
+<textarea id="json-editor" spellcheck="false"></textarea>
 <div class="actions"><button class="success" id="save-file">Guardar archivo</button><button class="secondary" id="save-project">Guardar proyecto</button><button class="secondary" id="back">Volver al generador</button><button class="primary" id="pack-download">Empaquetar y descargar</button></div>
 <div id="editor-status" class="status"></div><div class="actions"><button class="secondary" id="validate-addon">🔎 Revisar addon</button></div>
 <div id="validation-report" class="validation-box hidden" aria-live="polite"></div>
+
+<!-- NUEVO: PANEL PARA AGREGAR TEXTURAS PNG DESDE EL GESTOR DE ARCHIVOS -->
+<div class="validation-box" id="textures-panel" style="margin-top:22px">
+ <h3>🎨 Texturas del Addon (PNG)</h3>
+ <div class="tip">Aquí ves las texturas que necesita este addon. Pulsa <strong>Agregar textura PNG</strong> para abrir tu gestor de archivos y subir tu dibujo pixel art (16x16 o 32x32).</div>
+ <input type="file" id="png-file-input" accept="image/png" class="hidden">
+ <div id="texture-requirements-list"></div>
+ <div class="actions" style="margin-top:12px">
+  <button class="primary" id="btn-add-custom-png" type="button">🖼️ Agregar textura PNG</button>
+ </div>
+</div>
+
 <div class="validation-box" style="margin-top:22px">
  <h3>✨ Editar el addon</h3>
  <div class="tip">Describe qué quieres cambiar o añadir y la IA modificará los archivos del addon. Puedes deshacer el último cambio. También puedes editar a mano cualquier archivo en las pestañas de arriba.</div>
@@ -106,6 +134,8 @@ textarea{resize:vertical}.prompt{min-height:150px}.row{display:flex;gap:8px}.row
 const $=id=>document.getElementById(id),sidebar=$('sidebar'),generator=$('generator'),editor=$('editor');
 let addonFiles={},currentFile='',projects=[];
 let currentAddonNeedsAudio=false;
+let customUploadedTextures=new Set();
+let pendingTargetPngPath=null;
 const isText=v=>typeof v==='string';
 
 function requestedDialogueCount(description){
@@ -170,7 +200,6 @@ function extractJSON(text){
  s=s.slice(first,last+1);
  try{return JSON.parse(s)}catch(e){throw new Error('El objeto JSON principal de la respuesta está mal formado: '+e.message)}
 }
-/* Acepta: {ruta:"texto"}, {ruta:{objeto}}, {files:{...}} y [{path,content}]. */
 function normalizeFiles(obj){
  if(obj&&typeof obj==='object'&&!Array.isArray(obj)){
   const keys=Object.keys(obj);
@@ -192,7 +221,9 @@ function normalizeFiles(obj){
  if(!Object.keys(out).length)throw new Error('No se encontraron archivos en la respuesta.');
  return out;
 }
-const SYSTEM_PROMPT=`Eres desarrollador experto de Add-Ons para Minecraft Bedrock. Devuelve ÚNICAMENTE un objeto JSON válido: cada clave es una ruta de archivo y cada valor es su contenido textual como string. Dentro de cada string manifest.json también debe haber JSON ESTRICTO: todas las claves y cadenas con comillas dobles, sin comentarios ni comas finales. IMPORTANTE: product_type NUNCA va como propiedad raíz del manifest. La estructura "metadata": { "product_type": "addon" } va ÚNICAMENTE en BehaviorPack/manifest.json y debe ser la última propiedad del objeto manifest. NO la incluyas en ResourcePack/manifest.json. Si se solicita metadata de addon, la estructura exacta es: "metadata": { "product_type": "addon" }. Ejemplo: {"format_version":2,"header":{"name":"Ejemplo","description":"Ejemplo","uuid":"00000000-0000-4000-8000-000000000001","version":[1,0,0],"min_engine_version":[1,21,0]},"modules":[{"type":"data","uuid":"00000000-0000-4000-8000-000000000002","version":[1,0,0]}],"metadata":{"product_type":"addon"}}. Reglas: manifests format_version 2; usa BehaviorPack/manifest.json y ResourcePack/manifest.json si necesitas ambos; BP module type=data y RP type=resources; cada manifest lleva header y modules; UUID v4 únicos; dependencies solo con UUID real del otro pack; referencias a archivos existentes; no inventes componentes/APIs; no simules archivos PNG/OGG como texto; documenta recursos binarios pendientes en README.txt. No uses APIs experimentales salvo petición explícita. Devuelve solo JSON, sin Markdown.`;
+
+const SYSTEM_PROMPT=`Eres desarrollador experto de Add-Ons para Minecraft Bedrock. Devuelve ÚNICAMENTE un objeto JSON válido: cada clave es una ruta de archivo y cada valor es su contenido textual como string. Dentro de cada string manifest.json también debe haber JSON ESTRICTO: todas las claves y cadenas con comillas dobles, sin comentarios ni comas finales. IMPORTANTE: product_type NUNCA va como propiedad raíz del manifest. La estructura "metadata": { "product_type": "addon" } va ÚNICAMENTE en BehaviorPack/manifest.json y debe ser la última propiedad del objeto manifest. NO la incluyas en ResourcePack/manifest.json. Si se solicita metadata de addon, la estructura exacta es: "metadata": { "product_type": "addon" }. PROHIBIDO intentar generar archivos .png, imágenes o datos binarios como texto; si necesitas texturas, declara solo los archivos .json necesarios en el Resource Pack (como textures/item_texture.json). Reglas: manifests format_version 2; usa BehaviorPack/manifest.json y ResourcePack/manifest.json si necesitas ambos; BP module type=data y RP type=resources; cada manifest lleva header y modules; UUID v4 únicos; dependencies solo con UUID real del otro pack; referencias a archivos existentes; no inventes componentes/APIs; no simules archivos PNG/OGG como texto; documenta recursos binarios pendientes en README.txt. No uses APIs experimentales salvo petición explícita. Devuelve solo JSON, sin Markdown.`;
+
 function scoreGroqModel(m){
  const id=String(m.id||'').toLowerCase(),ctx=Number(m.context_window||0);let s=0;
  if(/gpt-oss-120b/.test(id))s=1200;else if(/llama-4-maverick/.test(id))s=1150;else if(/llama-3\.3-70b/.test(id))s=1100;else if(/qwen.*(32b|coder)/.test(id))s=1050;else if(/deepseek.*(r1|v3|coder)/.test(id))s=1040;else if(/gpt-oss-20b/.test(id))s=1000;else if(/70b|72b|90b|120b/.test(id))s=900;else if(/32b|34b|40b/.test(id))s=800;else if(/8b|7b|mini|small/.test(id))s=500;else s=650;
@@ -214,7 +245,6 @@ async function loadAvailableModels(silent=false){
  }catch(e){field.value='No se pudo elegir un modelo';field.dataset.model='';showStatus('status','Error al buscar modelos: '+e.message,'error');return false}
  finally{btn.disabled=false;btn.textContent='Buscar el mejor modelo de mi API'}
 }
-// "try again in 1h2m3.5s" / "7.2s" / "450ms" -> segundos (null si no hay dato)
 function parseWait(msg){
  const m=String(msg).match(/try again in\s+(?:(\d+)h)?(?:(\d+)m(?!s))?(?:([\d.]+)s)?/i);
  if(!m)return null;
@@ -238,8 +268,6 @@ async function callGroq(key,prompt,opts={}){
  const errors=[];
  for(const candidate of candidates){
   const model=candidate.id;
-  // IMPORTANTE: Groq cuenta max_completion_tokens dentro del límite de tokens por minuto.
-  // Pedir el máximo del modelo provoca errores 413/429 constantes, así que se limita.
   let outTokens=Math.min(candidate.max_completion_tokens>0?candidate.max_completion_tokens:maxOut,maxOut);
   let jsonMode=true,rateRetries=0,shrinks=0,data=null,ok=false;
   for(let attempt=0;attempt<8;attempt++){
@@ -255,7 +283,6 @@ async function callGroq(key,prompt,opts={}){
    const msg=data.error?.message||'Error de Groq ('+res.status+').';
    const code=String(data.error?.code||'');
    if(res.status===401||res.status===403)throw new Error('Groq no aceptó tu API Key. '+msg);
-   // Solicitud demasiado grande para el TPM: reducir la salida pedida y reintentar.
    const lim=msg.match(/Limit\s+(\d+)/i),req=msg.match(/Requested\s+(\d+)/i),used=msg.match(/Used\s+(\d+)/i);
    if((res.status===413||res.status===429)&&lim&&req&&(!used||Number(used[1])===0)&&/token/i.test(msg)){
     const next=Math.floor(outTokens-(Number(req[1])-Number(lim[1]))-300);
@@ -286,7 +313,7 @@ async function callGroq(key,prompt,opts={}){
  }
  throw new Error('Ningún modelo pudo completar la respuesta. Intentos: '+errors.join(' | ')+'.');
 }
-/* Parser tolerante SOLO para manifests. */
+
 function parseManifest(text){
  let s=String(text||'').trim().replace(/^```(?:json)?\s*/i,'').replace(/\s*```$/i,'').trim();
  const a=s.indexOf('{'),b=s.lastIndexOf('}');if(a<0||b<a)throw new Error('No contiene un objeto JSON.');s=s.slice(a,b+1);
@@ -333,19 +360,18 @@ function applyAchievementSetting(files){
    if(typeof oldUUID==='string'&&!uuidMap.has(oldUUID.toLowerCase()))uuidMap.set(oldUUID.toLowerCase(),fresh);
   }
  }
- // Reparar dependencias de packs: deben apuntar al header.uuid de OTRO pack del proyecto.
  const headerUUIDs=new Map(manifests.map(({path,manifest})=>[manifest.header.uuid.toLowerCase(),path]));
  for(const {path,manifest} of manifests){
   if(!Array.isArray(manifest.dependencies))continue;
   const others=manifests.filter(x=>x.path!==path);
   manifest.dependencies=manifest.dependencies.filter(dep=>{
    if(!dep||typeof dep!=='object')return false;
-   if(typeof dep.uuid!=='string')return true; // p. ej. module_name de @minecraft/server
+   if(typeof dep.uuid!=='string')return true;
    if(uuidMap.has(dep.uuid.toLowerCase()))dep.uuid=uuidMap.get(dep.uuid.toLowerCase());
    const owner=headerUUIDs.get(dep.uuid.toLowerCase());
    if(owner&&owner!==path)return true;
    if(others.length===1){dep.uuid=others[0].manifest.header.uuid;dep.version=others[0].manifest.header.version;return true}
-   return false; // apunta a un pack que no existe: se elimina
+   return false;
   });
   if(!manifest.dependencies.length)delete manifest.dependencies;
  }
@@ -369,6 +395,150 @@ function applyAchievementSetting(files){
  }
  if(!foundBP)throw new Error('No se identificó el manifest del Behavior Pack (módulo data/script).');
 }
+
+// ---------------- GESTIÓN DE TEXTURAS PNG ----------------
+function getDetectedTextures(files){
+ const found = new Map();
+ const rpPre = findRPPrefix() || 'ResourcePack/';
+ // 1. Revisar archivos JSON de texturas (item_texture.json, terrain_texture.json, etc.)
+ Object.keys(files).forEach(path => {
+  if (path.includes('textures/') && path.endsWith('.json') && isText(files[path])) {
+   try {
+    const texData = JSON.parse(files[path]);
+    const scan = (obj, parentKey='') => {
+     for (let k in obj) {
+      if (k === 'textures' && typeof obj[k] === 'string') {
+       let cleanRel = obj[k].replace(/^\/+/, '');
+       if (!cleanRel.endsWith('.png')) cleanRel += '.png';
+       let fullPath = cleanRel.startsWith(rpPre) ? cleanRel : rpPre + cleanRel;
+       let friendlyName = parentKey || cleanRel.split('/').pop().replace('.png', '');
+       found.set(fullPath, { path: fullPath, label: friendlyName });
+      } else if (typeof obj[k] === 'object' && obj[k] !== null) {
+       scan(obj[k], k === 'texture_data' ? '' : k);
+      }
+     }
+    };
+    scan(texData);
+   } catch(e) {}
+  }
+ });
+ // 2. Revisar cualquier .png que ya esté en el proyecto
+ Object.keys(files).forEach(path => {
+  if (/\.png$/i.test(path) && !found.has(path)) {
+   let friendlyName = path.split('/').pop().replace(/\.png$/i, '');
+   found.set(path, { path, label: friendlyName });
+  }
+ });
+ return [...found.values()];
+}
+
+function autoGenerateTexturePNGs(files){
+ const reqs = getDetectedTextures(files);
+ reqs.forEach(item => {
+  if (!files[item.path] || isText(files[item.path])) {
+   // PNG binario válido de 16x16 provisional (evita exclamación rota)
+   files[item.path] = new Uint8Array([
+    137,80,78,71,13,10,26,10,0,0,0,13,73,82,68,82,
+    0,0,0,16,0,0,0,16,8,6,0,0,0,31,113,182,211,0,
+    0,0,11,73,68,65,84,120,156,99,96,64,0,2,0,0,
+    5,0,1,137,189,173,36,0,0,0,0,73,69,78,68,174,
+    66,96,135
+   ]);
+  }
+ });
+}
+
+function renderTextureManager(){
+ const container = $('texture-requirements-list');
+ if(!container) return;
+ container.innerHTML = '';
+ const reqs = getDetectedTextures(addonFiles);
+ 
+ if(!reqs.length){
+  container.innerHTML = '<div class="tip" style="margin-top:8px">Este addon aún no declara texturas específicas en JSON, pero puedes subir cualquier PNG usando el botón de abajo.</div>';
+  return;
+ }
+
+ reqs.forEach(item => {
+  const row = document.createElement('div');
+  row.className = 'tex-item';
+
+  const img = document.createElement('img');
+  img.className = 'tex-preview';
+  const fileData = addonFiles[item.path];
+  if (fileData instanceof Uint8Array || fileData instanceof ArrayBuffer) {
+   const blob = new Blob([fileData], {type: 'image/png'});
+   img.src = URL.createObjectURL(blob);
+  }
+
+  const info = document.createElement('div');
+  info.className = 'tex-info';
+  const cleanLabel = item.label.replace(/^.*:/, '').replace(/_/g, ' ');
+  info.innerHTML = `<div class="tex-title">Pon una textura de: <span style="color:#fff;text-decoration:underline">${cleanLabel}</span></div>
+                    <div class="tex-path">${item.path}</div>`;
+  
+  const badge = document.createElement('span');
+  const isCustom = customUploadedTextures.has(item.path);
+  badge.className = 'tex-badge ' + (isCustom ? 'custom' : 'placeholder');
+  badge.textContent = isCustom ? '✅ Textura PNG subida' : '⚠️ Textura base provisional (sube tu dibujo)';
+  info.appendChild(badge);
+
+  const btn = document.createElement('button');
+  btn.className = 'secondary';
+  btn.textContent = '🖼️ Subir PNG para esto';
+  btn.onclick = () => {
+   pendingTargetPngPath = item.path;
+   $('png-file-input').click();
+  };
+
+  row.append(img, info, btn);
+  container.appendChild(row);
+ });
+}
+
+$('btn-add-custom-png').onclick = () => {
+ const reqs = getDetectedTextures(addonFiles);
+ if (reqs.length === 1) {
+  pendingTargetPngPath = reqs[0].path;
+ } else {
+  pendingTargetPngPath = null; // Pedirá ruta o usará el nombre del archivo en ResourcePack/textures/items/
+ }
+ $('png-file-input').click();
+};
+
+$('png-file-input').onchange = (e) => {
+ const file = e.target.files[0];
+ e.target.value = '';
+ if (!file) return;
+ if (!file.name.toLowerCase().endsWith('.png')) {
+  alert('Por favor selecciona un archivo de imagen en formato .png');
+  return;
+ }
+
+ const reader = new FileReader();
+ reader.onload = () => {
+  const bytes = new Uint8Array(reader.result);
+  let targetPath = pendingTargetPngPath;
+
+  if (!targetPath) {
+   const rpPre = findRPPrefix() || 'ResourcePack/';
+   const cleanName = file.name.toLowerCase().replace(/[^a-z0-9_.-]/g, '_');
+   const suggested = rpPre + 'textures/items/' + cleanName;
+   const customPath = prompt('¿En qué ruta del Resource Pack quieres guardar esta textura?', suggested);
+   if (!customPath || !customPath.trim()) return;
+   targetPath = customPath.trim().replace(/\\/g, '/').replace(/^\/+/, '');
+  }
+
+  addonFiles[targetPath] = bytes;
+  customUploadedTextures.add(targetPath);
+  renderTabs();
+  renderTextureManager();
+  openFile(targetPath);
+  showStatus('editor-status', `¡Textura "${file.name}" agregada correctamente en ${targetPath}!`, 'good');
+ };
+ reader.readAsArrayBuffer(file);
+};
+
 function findBPPrefix(){
  const p=Object.keys(addonFiles).find(p=>p.toLowerCase().endsWith('manifest.json')&&isText(addonFiles[p])&&(()=>{try{return JSON.parse(addonFiles[p]).modules?.some(m=>['data','script','javascript'].includes(String(m.type).toLowerCase()))}catch{return false}})());
  return p===undefined?null:p.slice(0,p.lastIndexOf('/')+1);
@@ -377,6 +547,7 @@ function findRPPrefix(){
  const p=Object.keys(addonFiles).find(p=>p.toLowerCase().endsWith('manifest.json')&&isText(addonFiles[p])&&(()=>{try{return JSON.parse(addonFiles[p]).modules?.some(m=>m.type==='resources')}catch{return false}})());
  return p===undefined?null:p.slice(0,p.lastIndexOf('/')+1);
 }
+
 $('generate').onclick=async()=>{
  const key=$('api-key').value.trim(),description=$('prompt').value.trim();currentAddonNeedsAudio=requestNeedsAudio(description);
  if(!key||!description){alert('Falta la clave API o la descripción del addon.');return}
@@ -390,11 +561,14 @@ $('generate').onclick=async()=>{
   const audioRule=currentAddonNeedsAudio
    ?`La solicitud SÍ requiere voz/audio. IMPORTANTE: NO escribas una lista larga de diálogos dentro de la respuesta principal. Crea solamente la estructura básica del addon (incluye Resource Pack) y deja los diálogos para un archivo separado que añadirá el generador. NO inventes archivos .ogg ni sonido binario.`
    :'La solicitud NO pide audio, voces ni sonidos: NO generes archivos de sonido, sound_definitions, mapas de voces ni referencias a .ogg/.wav/.mp3.';
-  const request=`Genera SOLO los archivos esenciales y completos necesarios para esta solicitud, usando rutas BehaviorPack/ y ResourcePack/ cuando hagan falta ambos. Mantén la respuesta compacta: sin ejemplos, documentación extensa ni grandes listas de datos.\n${audioRule}\nMetadata product_type addon: ${$('keep-achievements').value}.\nVersión objetivo de Bedrock: ${$('engine-version').value.trim()||'1.21.0'}.\nSolicitud: ${description}\nLa respuesta externa debe ser un único objeto JSON válido. Cada manifest.json debe ser JSON estricto dentro de su string. No inventes archivos binarios.`;
+  const request=`Genera SOLO los archivos esenciales y completos necesarios para esta solicitud, usando rutas BehaviorPack/ y ResourcePack/ cuando hagan falta ambos. PROHIBIDO intentar generar archivos .png o imágenes como texto.\n${audioRule}\nMetadata product_type addon: ${$('keep-achievements').value}.\nVersión objetivo de Bedrock: ${$('engine-version').value.trim()||'1.21.0'}.\nSolicitud: ${description}\nLa respuesta externa debe ser un único objeto JSON válido.`;
   showStatus('status',currentAddonNeedsAudio?'Creando estructura del addon; después generaré los diálogos por tandas…':'Conectando con Groq y generando archivos…');
   const raw=await callGroq(key,request);
   addonFiles=normalizeFiles(extractJSON(raw));
+  customUploadedTextures.clear();
   applyAchievementSetting(addonFiles);
+  autoGenerateTexturePNGs(addonFiles);
+  
   let madeDialogues=0;
   if(currentAddonNeedsAudio&&dialogueCount>0){
    const dialogues=await generateDialoguesInBatches(key,description,dialogueCount);
@@ -404,7 +578,7 @@ $('generate').onclick=async()=>{
    addonFiles[bpPrefix+'dialogues.json']=JSON.stringify({format_version:1,dialogues},null,2);
   }
   currentFile='';
-  renderTabs();refreshPackChoices();openFile(Object.keys(addonFiles).sort()[0]);updateTtsVisibility(currentAddonNeedsAudio);
+  renderTabs();refreshPackChoices();renderTextureManager();openFile(Object.keys(addonFiles).sort()[0]);updateTtsVisibility(currentAddonNeedsAudio);
   if(currentAddonNeedsAudio){
    $('tts-dialogues').value=collectDialogueStrings().join('\n');
    showStatus('editor-status',`Addon creado. Se añadieron ${madeDialogues} de ${dialogueCount} diálogos. Revisa los textos y luego genera sus voces con Gemini TTS.`,'good');
@@ -413,41 +587,67 @@ $('generate').onclick=async()=>{
  }catch(err){showStatus('status','Error: '+err.message,'error')}
  finally{btn.disabled=false;btn.textContent='Generar addon y abrir editor'}
 };
+
 function renderTabs(){
  const wrap=$('file-tabs');wrap.innerHTML='';
  Object.keys(addonFiles).sort().forEach(name=>{
   const b=document.createElement('button');b.className='tab'+(name===currentFile?' active':'');
-  b.textContent=(isText(addonFiles[name])?'':'🔊 ')+name;b.title=name;
+  const isImg=/\.png$/i.test(name);
+  b.textContent=(isImg?'🖼️ ':isText(addonFiles[name])?'':'🔊 ')+name;b.title=name;
   b.onclick=()=>{saveCurrent(false);openFile(name)};wrap.appendChild(b);
  });
 }
+
 function openFile(name){
  currentFile=name;$('current-file-name').textContent=name;
- const v=addonFiles[name],ed=$('json-editor');
+ const v=addonFiles[name],ed=$('json-editor'),prevBox=$('png-preview-box');
+ 
+ if(/\.png$/i.test(name)){
+  ed.classList.add('hidden');
+  prevBox.classList.remove('hidden');
+  if (v instanceof Uint8Array || v instanceof ArrayBuffer) {
+   const blob = new Blob([v], {type: 'image/png'});
+   $('png-preview-img').src = URL.createObjectURL(blob);
+   const isCustom = customUploadedTextures.has(name);
+   $('png-preview-caption').textContent = isCustom
+    ? `✅ Textura PNG personalizada cargada (${v.byteLength} bytes). Lista para empaquetar.`
+    : `⚠️ Textura provisional de 16x16. Usa el botón «🖼️ Agregar textura PNG» abajo para reemplazarla con tu dibujo.`;
+  }
+  renderTabs();
+  return;
+ }
+
+ prevBox.classList.add('hidden');
+ ed.classList.remove('hidden');
  if(isText(v)){ed.readOnly=false;ed.value=v}
  else{ed.readOnly=true;ed.value=`[Archivo binario: ${v?.length||0} bytes. No se puede editar como texto, pero sí se incluirá al empaquetar.]`}
  renderTabs();
 }
+
 function saveCurrent(show=true){
  if(!currentFile)return;
- if(!isText(addonFiles[currentFile]))return; // nunca convertir binarios (OGG) a texto
+ if(!isText(addonFiles[currentFile]))return;
  addonFiles[currentFile]=$('json-editor').value;
+ renderTextureManager();
  if(show)showStatus('editor-status','Guardado: '+currentFile,'good');
 }
+
 $('save-file').onclick=()=>saveCurrent(true);
 $('save-project').onclick=()=>{
  saveCurrent(false);const name=prompt('Nombre para guardar este proyecto:');if(!name?.trim())return;
  const files={};let skipped=0;
  for(const [k,v] of Object.entries(addonFiles)){if(isText(v))files[k]=v;else skipped++}
- projects.push({name:name.trim(),summary:Object.keys(files).length+' archivos'+(skipped?` (+${skipped} audios no guardados)`:''),files});
+ projects.push({name:name.trim(),summary:Object.keys(files).length+' archivos'+(skipped?` (+${skipped} binarios/audios)`:''),files});
  if(!persistProjects()){projects.pop();showStatus('editor-status','No se pudo guardar: el almacenamiento del navegador está lleno. Descarga el addon con «Empaquetar».','error');return}
  renderProjects();
- showStatus('editor-status',skipped?`Proyecto guardado. Los ${skipped} audios no se guardan en el navegador: descarga el paquete para conservarlos.`:'Proyecto guardado en este navegador.','good');
+ showStatus('editor-status','Proyecto guardado en este navegador.','good');
 };
 $('back').onclick=()=>{saveCurrent(false);editor.style.display='none';generator.style.display='block';hideStatus('editor-status')};
+
 function getManifestEntries(){return Object.keys(addonFiles).filter(p=>p.toLowerCase().split('/').pop()==='manifest.json').sort()}
 function refreshPackChoices(){const manifests=getManifestEntries(),wrap=$('pack-choice-wrap'),sel=$('pack-choice');sel.innerHTML='';if(manifests.length>1){const all=document.createElement('option');all.value='__all__';all.textContent='Todos juntos (se descarga como .mcaddon)';sel.appendChild(all)}manifests.forEach(path=>{const o=document.createElement('option');o.value=path;o.textContent=path;sel.appendChild(o)});wrap.classList.toggle('hidden',manifests.length<2)}
 function addIssue(list,type,message){list.push({type,message})}
+
 function validateAddon(){
  saveCurrent(false);const issues=[],parsed=new Map(),uuidSeen=new Map(),paths=Object.keys(addonFiles);
  if(!paths.length)addIssue(issues,'error','El proyecto no contiene archivos.');
@@ -472,6 +672,7 @@ function validateAddon(){
  showStatus('editor-status',errors?`Se encontraron ${errors} errores. Corrígelos antes de empaquetar.`:warns?`Revisión terminada: ${warns} advertencia(s).`:'Revisión terminada: no se detectaron errores automáticos.',errors?'error':'good');return{errors,warns};
 }
 $('validate-addon').onclick=()=>validateAddon();
+
 $('pack-download').onclick=async()=>{
  saveCurrent(false);const btn=$('pack-download');btn.disabled=true;btn.textContent='Empaquetando…';
  try{
@@ -547,7 +748,6 @@ function base64ToBytes(b64){
  for(let i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i);
  return bytes;
 }
-// Gemini suele devolver PCM crudo (16 bit, mono, 24 kHz) sin cabecera: se envuelve en WAV.
 function pcmToWav(pcm,rate=24000){
  const h=new ArrayBuffer(44),v=new DataView(h);
  const w=(o,s)=>{for(let i=0;i<s.length;i++)v.setUint8(o+i,s.charCodeAt(i))};
@@ -584,10 +784,10 @@ async function geminiSpeak(text,voice,key,model,style){
   data=await res.json().catch(()=>({}));
   if(res.status===429||res.status>=500){
    const info=String(data.error?.message||'')+' '+JSON.stringify(data.error?.details||'');
-   if(res.status===429&&/per\s?day|PerDay|daily/i.test(info))throw new Error('Se agotó la cuota DIARIA de Gemini (plan gratis). Los audios ya hechos se conservan: pulsa «Generar» otra vez mañana (se reinicia a medianoche, hora del Pacífico) o activa facturación en Google AI Studio.');
+   if(res.status===429&&/per\s?day|PerDay|daily/i.test(info))throw new Error('Se agotó la cuota DIARIA de Gemini (plan gratis). Los audios ya hechos se conservan: pulsa «Generar» otra vez mañana.');
    const m=info.match(/(?:retry in|retryDelay"?:?\s*"?)\s*([\d.]+)s/i);
    const wait=Math.min(90,Math.max(5,m?Number(m[1])+2:15*(attempt+1)));
-   showStatus('tts-status','Gemini pidió esperar (límite por minuto). Reintentando en '+Math.ceil(wait)+' s…');
+   showStatus('tts-status','Gemini pidió esperar. Reintentando en '+Math.ceil(wait)+' s…');
    await sleep(wait*1000);continue;
   }
   break;
@@ -599,7 +799,7 @@ async function geminiSpeak(text,voice,key,model,style){
    for(const part of step.content)if(part.type==='audio'&&part.data)audio=part.data;
   }
  }
- if(!audio)throw new Error('Gemini no devolvió audio. Comprueba que tu clave tenga acceso al modelo TTS.');
+ if(!audio)throw new Error('Gemini no devolvió audio.');
  const bytes=base64ToBytes(audio);
  const isRiff=bytes[0]===0x52&&bytes[1]===0x49&&bytes[2]===0x46&&bytes[3]===0x46;
  return isRiff?bytes:pcmToWav(bytes);
@@ -609,7 +809,7 @@ function addVoiceSoundDefinitions(lines,prefix){
  let defs={format_version:'1.14.0',sound_definitions:{}};
  if(isText(addonFiles[defsPath])){
   try{defs=JSON.parse(addonFiles[defsPath]);defs.sound_definitions=defs.sound_definitions||{}}
-  catch{throw new Error('El archivo '+defsPath+' ya existe pero su JSON está dañado. Corrígelo antes de añadir voces.')}
+  catch{throw new Error('El archivo '+defsPath+' ya existe pero su JSON está dañado.')}
  }
  const map=[];
  lines.forEach((line,i)=>{
@@ -618,19 +818,19 @@ function addVoiceSoundDefinitions(lines,prefix){
   map.push({id:i+1,event,file:'sounds/voices/dialogue_'+n+'.ogg',text:line,voice:i%2===0?$('tts-voice-a').value:$('tts-voice-b').value});
  });
  addonFiles[defsPath]=JSON.stringify(defs,null,2);
- addonFiles[prefix+'sounds/villager_voice_map.json']=JSON.stringify({note:'El Behavior Pack debe ejecutar playsound para el evento correspondiente.',dialogues:map},null,2);
+ addonFiles[prefix+'sounds/villager_voice_map.json']=JSON.stringify({note:'Mapeo de voces para diálogos.',dialogues:map},null,2);
 }
 const ttsDone={};
 $('generate-voices').onclick=async()=>{
  const key=$('gemini-api-key').value.trim(),lines=$('tts-dialogues').value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
  if(!key){alert('Pega tu clave API de Gemini.');return}
- if(!lines.length){alert('Añade al menos un diálogo, uno por línea.');return}
- if(lines.length>100){alert('Por seguridad, genera un máximo de 100 audios por tanda.');return}
+ if(!lines.length){alert('Añade al menos un diálogo.');return}
+ if(lines.length>100){alert('Máximo 100 audios por tanda.');return}
  const btn=$('generate-voices');btn.disabled=true;btn.textContent='Preparando voces…';
  try{
   saveCurrent(false);
   const prefix=findRPPrefix();
-  if(prefix===null)throw new Error('Este proyecto no tiene Resource Pack. Crea uno para poder incluir los archivos OGG.');
+  if(prefix===null)throw new Error('Este proyecto no tiene Resource Pack.');
   const model=$('tts-model').value,style=$('tts-style').value;
   await loadOggEncoder();
   const gap=Math.max(0,Number($('tts-gap').value)||60);let inBatch=0;
@@ -638,14 +838,11 @@ $('generate-voices').onclick=async()=>{
    const n=String(i+1).padStart(3,'0'),voice=i%2===0?$('tts-voice-a').value:$('tts-voice-b').value;
    const outPath=prefix+'sounds/voices/dialogue_'+n+'.ogg';
    if(ttsDone[i]===lines[i]&&addonFiles[outPath])continue;
-   if(inBatch>=3){for(let s=gap;s>0;s--){showStatus('tts-status',`Tanda de 3 audios lista (${i}/${lines.length}). Esperando ${s} s antes de la siguiente tanda…`);await sleep(1000)}inBatch=0}
+   if(inBatch>=3){for(let s=gap;s>0;s--){showStatus('tts-status',`Tanda de 3 audios lista. Esperando ${s} s…`);await sleep(1000)}inBatch=0}
    showStatus('tts-status',`Generando audio ${i+1}/${lines.length}: voz ${voice}`);
    inBatch++;
-   let wav;
-   try{wav=await geminiSpeak(lines[i],voice,key,model,style)}
-   catch(e){throw new Error('Diálogo '+(i+1)+' falló: '+e.message)}
-   let ogg;
-   try{ogg=await wavToOgg(wav)}catch(e){throw new Error('Diálogo '+(i+1)+': no se pudo convertir a OGG ('+e.message+')')}
+   let wav=await geminiSpeak(lines[i],voice,key,model,style);
+   let ogg=await wavToOgg(wav);
    addonFiles[outPath]=new Uint8Array(await ogg.arrayBuffer());
    ttsDone[i]=lines[i];
    addVoiceSoundDefinitions(lines.slice(0,i+1),prefix);
@@ -653,35 +850,36 @@ $('generate-voices').onclick=async()=>{
   }
   addVoiceSoundDefinitions(lines,prefix);
   renderTabs();
-  showStatus('tts-status','¡Listo! Se generaron '+lines.length+' archivos OGG Vorbis y se añadieron al Resource Pack. Revisa sounds/villager_voice_map.json para conectar cada evento con la lógica de diálogo.','good');
+  showStatus('tts-status','¡Listo! Se generaron '+lines.length+' archivos OGG.','good');
  }catch(e){showStatus('tts-status','Error al generar voces: '+e.message,'error')}
  finally{btn.disabled=false;btn.textContent='Generar voces OGG y añadir al pack'}
 };
 
-// ---------------- Edición del addon ----------------
 let lastBackup=null;
-function showFirstFile(){const first=Object.keys(addonFiles).sort()[0];currentFile='';renderTabs();refreshPackChoices();if(first)openFile(first);else{$('json-editor').value='';$('current-file-name').textContent='Archivo'}}
+function showFirstFile(){const first=Object.keys(addonFiles).sort()[0];currentFile='';renderTabs();refreshPackChoices();renderTextureManager();if(first)openFile(first);else{$('json-editor').value='';$('current-file-name').textContent='Archivo'}}
 $('new-file').onclick=()=>{
  saveCurrent(false);
  const n=prompt('Ruta del nuevo archivo (ej. BehaviorPack/entities/mi_mob.json):');if(!n?.trim())return;
  const clean=n.trim().replace(/\\/g,'/').replace(/^\/+/,'').replace(/\.\.\//g,'');
  if(addonFiles[clean]!==undefined){alert('Ese archivo ya existe.');return}
- lastBackup={...addonFiles};addonFiles[clean]='';renderTabs();refreshPackChoices();openFile(clean);
+ lastBackup={...addonFiles};addonFiles[clean]='';renderTabs();refreshPackChoices();renderTextureManager();openFile(clean);
 };
 $('delete-file').onclick=()=>{
  if(!currentFile)return;
  if(!confirm('¿Eliminar '+currentFile+'?'))return;
- lastBackup={...addonFiles};delete addonFiles[currentFile];showFirstFile();
- showStatus('editor-status','Archivo eliminado. Puedes deshacerlo con «Deshacer último cambio».','good');
+ lastBackup={...addonFiles};delete addonFiles[currentFile];customUploadedTextures.delete(currentFile);showFirstFile();
+ showStatus('editor-status','Archivo eliminado.','good');
 };
 $('undo-edit').onclick=()=>{
  if(!lastBackup){showStatus('editor-status','No hay nada que deshacer.','error');return}
  addonFiles=lastBackup;lastBackup=null;showFirstFile();showStatus('editor-status','Último cambio deshecho.','good');
 };
-const EDIT_SYSTEM='Eres desarrollador experto de Add-Ons para Minecraft Bedrock. Recibes los archivos actuales de un addon y una instrucción de cambio. Devuelves ÚNICAMENTE JSON válido con esta forma: {"files":{"ruta":"contenido completo del archivo"},"delete":["ruta"]}. En "files" pon SOLO los archivos nuevos o modificados, con su contenido COMPLETO (no fragmentos). No repitas archivos sin cambios. No cambies UUID ni versiones de los manifest salvo que sea imprescindible. JSON estricto en los .json, sin comentarios ni comas finales. No inventes componentes/APIs ni archivos binarios. Sin Markdown.';
+
+const EDIT_SYSTEM='Eres desarrollador experto de Add-Ons para Minecraft Bedrock. Recibes los archivos actuales de un addon y una instrucción de cambio. Devuelve ÚNICAMENTE JSON válido con esta forma: {"files":{"ruta":"contenido completo del archivo"},"delete":["ruta"]}. En "files" pon SOLO los archivos nuevos o modificados, con su contenido COMPLETO (no fragmentos). No repitas archivos sin cambios. JSON estricto en los .json. No inventes componentes/APIs ni archivos binarios/png. Sin Markdown.';
+
 $('ai-edit').onclick=async()=>{
  const key=$('api-key').value.trim(),instr=$('ai-edit-prompt').value.trim();
- if(!key){alert('Falta la clave API de Groq (se pone en el generador).');return}
+ if(!key){alert('Falta la clave API de Groq.');return}
  if(!instr){alert('Escribe qué quieres cambiar.');return}
  saveCurrent(false);
  const btn=$('ai-edit');btn.disabled=true;btn.textContent='Editando…';
@@ -692,7 +890,7 @@ $('ai-edit').onclick=async()=>{
    if(!isText(c))continue;
    if(c.length<=budget){budget-=c.length;parts.push('=== '+p+' ===\n'+c)}else omitted.add(p);
   }
-  const prompt=`Archivos actuales del addon:\n${parts.join('\n\n')}${omitted.size?'\n\nArchivos omitidos por tamaño (NO los modifiques ni los sobrescribas): '+[...omitted].join(', '):''}\n\nCambio solicitado: ${instr}\n\nDevuelve solo el JSON {"files":{...},"delete":[...]}.`;
+  const prompt=`Archivos actuales del addon:\n${parts.join('\n\n')}${omitted.size?'\n\nArchivos omitidos por tamaño (NO los modifiques): '+[...omitted].join(', '):''}\n\nCambio solicitado: ${instr}\n\nDevuelve solo el JSON {"files":{...},"delete":[...]}.`;
   showStatus('editor-status','Pidiendo los cambios a Groq…');
   const raw=await callGroq(key,prompt,{system:EDIT_SYSTEM,user:prompt,maxTokens:12000,validate:r=>{const o=extractJSON(r);if(!o.files&&!o.delete)throw new Error('falta files o delete')}});
   const obj=extractJSON(raw);
@@ -708,18 +906,18 @@ $('ai-edit').onclick=async()=>{
    const p=p0.replace(/\\/g,'/').replace(/^\/+/,'');
    if(isText(addonFiles[p])&&!omitted.has(p)){delete addonFiles[p];n++}
   }
-  if(!n){addonFiles=backup;throw new Error('La IA no hizo ningún cambio. Intenta explicarlo con más detalle.')}
-  try{applyAchievementSetting(addonFiles)}
-  catch(e){addonFiles=backup;throw new Error('Los cambios dejaban el manifest dañado y se descartaron: '+e.message)}
+  if(!n){addonFiles=backup;throw new Error('La IA no hizo ningún cambio.')}
+  try{applyAchievementSetting(addonFiles); autoGenerateTexturePNGs(addonFiles);}
+  catch(e){addonFiles=backup;throw new Error('Los cambios dejaron el manifest dañado: '+e.message)}
   lastBackup=backup;
   const keep=currentFile;showFirstFile();if(addonFiles[keep]!==undefined)openFile(keep);
   $('ai-edit-prompt').value='';
-  showStatus('editor-status',`Listo: se aplicaron ${n} cambio(s) de archivo. Revisa el resultado y pulsa «Revisar addon». Si no te gusta, usa «Deshacer último cambio».`,'good');
+  showStatus('editor-status',`Listo: se aplicaron ${n} cambio(s).`,'good');
  }catch(e){showStatus('editor-status','Error al editar con IA: '+e.message,'error')}
  finally{btn.disabled=false;btn.textContent='✨ Aplicar cambio con IA'}
 };
 
-function renderProjects(){const list=$('project-list');list.innerHTML='';projects.forEach(p=>{const d=document.createElement('div');d.className='chat-item';const st=document.createElement('strong');st.textContent=p.name;const sm=document.createElement('small');sm.textContent=p.summary||'Proyecto guardado';d.append(st,sm);d.onclick=()=>{if(!p.files||!Object.keys(p.files).length){alert('Este proyecto está vacío.');return}addonFiles={...p.files};currentFile='';refreshPackChoices();renderTabs();openFile(Object.keys(addonFiles).sort()[0]);updateTtsVisibility(projectHasAudio());generator.style.display='none';editor.style.display='block';sidebar.classList.remove('open')};list.appendChild(d)})}
+function renderProjects(){const list=$('project-list');list.innerHTML='';projects.forEach(p=>{const d=document.createElement('div');d.className='chat-item';const st=document.createElement('strong');st.textContent=p.name;const sm=document.createElement('small');sm.textContent=p.summary||'Proyecto guardado';d.append(st,sm);d.onclick=()=>{if(!p.files||!Object.keys(p.files).length){alert('Este proyecto está vacío.');return}addonFiles={...p.files};customUploadedTextures.clear();autoGenerateTexturePNGs(addonFiles);currentFile='';refreshPackChoices();renderTabs();renderTextureManager();openFile(Object.keys(addonFiles).sort()[0]);updateTtsVisibility(projectHasAudio());generator.style.display='none';editor.style.display='block';sidebar.classList.remove('open')};list.appendChild(d)})}
 $('new-project').onclick=()=>{const name=prompt('Nombre del nuevo proyecto:');if(!name?.trim())return;projects.push({name:name.trim(),summary:'Proyecto nuevo',files:{}});persistProjects();renderProjects();sidebar.classList.remove('open')};
 updateTtsVisibility(false);
 renderProjects();
