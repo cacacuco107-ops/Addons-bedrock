@@ -423,7 +423,7 @@ $('save-project').onclick=()=>{
 };
 $('back').onclick=()=>{saveCurrent(false);editor.style.display='none';generator.style.display='block';hideStatus('editor-status')};
 function getManifestEntries(){return Object.keys(addonFiles).filter(p=>p.toLowerCase().split('/').pop()==='manifest.json').sort()}
-function refreshPackChoices(){const manifests=getManifestEntries(),wrap=$('pack-choice-wrap'),sel=$('pack-choice');sel.innerHTML='';manifests.forEach(path=>{const o=document.createElement('option');o.value=path;o.textContent=path;sel.appendChild(o)});wrap.classList.toggle('hidden',manifests.length<2)}
+function refreshPackChoices(){const manifests=getManifestEntries(),wrap=$('pack-choice-wrap'),sel=$('pack-choice');sel.innerHTML='';if(manifests.length>1){const all=document.createElement('option');all.value='__all__';all.textContent='Todos (un .mcpack por cada pack)';sel.appendChild(all)}manifests.forEach(path=>{const o=document.createElement('option');o.value=path;o.textContent=path;sel.appendChild(o)});wrap.classList.toggle('hidden',manifests.length<2)}
 function addIssue(list,type,message){list.push({type,message})}
 function validateAddon(){
  saveCurrent(false);const issues=[],parsed=new Map(),uuidSeen=new Map(),paths=Object.keys(addonFiles);
@@ -456,6 +456,13 @@ $('pack-download').onclick=async()=>{
   const check=validateAddon();if(check.errors)throw new Error('La revisión encontró errores. Corrígelos antes de empaquetar.');
   const ext=$('pack-type').value,manifests=getManifestEntries();if(!manifests.length)throw new Error('No hay manifest.json.');
   const makePackZip=async(manifestPath)=>{const prefix=manifestPath.includes('/')?manifestPath.slice(0,manifestPath.lastIndexOf('/')+1):'',zip=new JSZip();let count=0;for(const [path,content] of Object.entries(addonFiles)){if(path.startsWith(prefix)){const relative=path.slice(prefix.length);if(relative){zip.file(relative,content);count++}}}if(!count||!zip.file('manifest.json'))throw new Error('El pack '+manifestPath+' no contiene manifest.json en su raíz.');return await zip.generateAsync({type:'blob',compression:'DEFLATE',compressionOptions:{level:6}})};
+  const packLabel=(p,i)=>{try{const t=(JSON.parse(addonFiles[p]).modules||[]).map(x=>x.type);return t.includes('resources')?'ResourcePack':(t.includes('data')||t.includes('script'))?'BehaviorPack':'Pack'+(i+1)}catch{return 'Pack'+(i+1)}};
+  const saveBlob=(b,name)=>{const a=document.createElement('a'),u=URL.createObjectURL(b);a.href=u;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),4000)};
+  if(ext==='mcpack'&&manifests.length>1&&$('pack-choice').value==='__all__'){
+   for(let i=0;i<manifests.length;i++){saveBlob(await makePackZip(manifests[i]),packLabel(manifests[i],i)+'.mcpack');await new Promise(r=>setTimeout(r,800))}
+   showStatus('editor-status','Se descargaron '+manifests.length+' archivos .mcpack (Behavior Pack y Resource Pack). Importa los dos. Si tu navegador bloqueó el segundo, permite las descargas múltiples.','good');
+   return;
+  }
   let blob;if(ext==='mcpack'){const selected=manifests.length>1?$('pack-choice').value:manifests[0];if(!selected)throw new Error('Selecciona el pack.');blob=await makePackZip(selected)}
   else{const zip=new JSZip();for(let i=0;i<manifests.length;i++){const m=JSON.parse(addonFiles[manifests[i]]),types=(m.modules||[]).map(x=>x.type),label=types.includes('resources')?'ResourcePack':types.includes('data')||types.includes('script')?'BehaviorPack':'Pack'+(i+1);zip.file(label+'.mcpack',await makePackZip(manifests[i]))}blob=await zip.generateAsync({type:'blob',compression:'DEFLATE',compressionOptions:{level:6}})}
   const a=document.createElement('a'),url=URL.createObjectURL(blob);a.href=url;a.download='Addon_Bedrock.'+ext;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),2000);showStatus('editor-status','Paquete creado. Importa y prueba el addon en un mundo de prueba.','good');
