@@ -1,0 +1,635 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Generador de Addons Bedrock — Groq FIX 2</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+:root{--bg:#0b1528;--side:#101b30;--card:#112038;--text:#eef4ff;--muted:#a8b8d3;--accent:#72b6ff;--ok:#86efac;--bad:#f87171;--line:#1f324f}
+*{box-sizing:border-box;font-family:system-ui,-apple-system,Segoe UI,sans-serif}
+body{margin:0;background:var(--bg);color:var(--text);min-height:100vh}
+button{cursor:pointer;border:0;border-radius:10px;padding:12px 16px;font-weight:700}
+button:disabled{opacity:.6;cursor:wait}
+.menu{position:fixed;z-index:10;top:12px;left:12px;background:var(--accent);color:#081830}
+.sidebar{position:fixed;z-index:9;inset:0 auto 0 0;width:285px;padding:70px 16px 18px;background:var(--side);border-right:1px solid var(--line);transform:translateX(-100%);transition:.25s;overflow:auto}
+.sidebar.open{transform:translateX(0)}.sidebar h2{margin:0 0 14px}.new{width:100%;background:var(--accent);margin-bottom:14px}
+.chat-item{background:var(--card);padding:12px;border-radius:9px;margin:8px 0;cursor:pointer;overflow-wrap:anywhere}.chat-item small{display:block;color:var(--muted);margin-top:4px}
+main{max-width:1050px;margin:auto;padding:76px 18px 40px}.card{background:var(--card);padding:clamp(18px,3vw,28px);border-radius:16px;margin-bottom:20px;box-shadow:0 10px 30px #0003}
+h1{font-size:clamp(23px,4vw,30px);margin:0 0 8px}.sub,.tip{color:var(--muted)}.sub{margin-bottom:24px}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-bottom:17px}
+label{display:block;font-weight:600;margin:0 0 8px}
+input,select,textarea{width:100%;padding:13px;border:1px solid var(--line);border-radius:9px;background:#182842;color:var(--text);font-size:15px}
+textarea{resize:vertical}.prompt{min-height:150px}.row{display:flex;gap:8px}.row input{min-width:0;flex:1}
+.secondary{background:#2c4366;color:white}.primary{background:var(--accent);color:#081830}.success{background:var(--ok);color:#081830}.danger{background:var(--bad);color:#240909}
+.full{width:100%;margin-top:16px}.tip{font-size:13px;margin-top:10px;line-height:1.5}
+.status{display:none;margin-top:14px;color:var(--accent);font-weight:700;overflow-wrap:anywhere}.status.error{color:var(--bad)}.status.good{color:var(--ok)}
+#editor{display:none}.tabs{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0}.tab{background:#182842;color:var(--text);font-weight:500}.tab.active{background:var(--accent);color:#081830}
+#json-editor{min-height:380px;font:13px/1.5 ui-monospace,monospace;white-space:pre;tab-size:2}
+.actions{display:flex;gap:10px;flex-wrap:wrap}.actions button{flex:1;min-width:160px;margin-top:12px}.hidden{display:none!important}
+.validation-box{margin-top:18px;padding:16px;border:1px solid var(--line);border-radius:12px;background:#0d1a2e}
+.validation-box h3{margin:0 0 10px}.validation-summary{font-weight:800;margin-bottom:10px}.validation-list{margin:0;padding-left:22px;line-height:1.6}
+.validation-list li.error{color:#fca5a5}.validation-list li.warn{color:#fde68a}.validation-list li.ok{color:#86efac}
+.pack-select{margin-top:14px}
+@media(max-width:650px){.grid{grid-template-columns:1fr;gap:12px}.card{padding:18px}.sidebar{width:min(85vw,300px)}}
+</style>
+</head>
+<body>
+<button class="menu" id="menu-toggle" aria-label="Abrir historial">☰</button>
+<aside class="sidebar" id="sidebar"><h2>Proyectos</h2><button class="new" id="new-project">＋ Nuevo proyecto</button><div id="project-list"></div></aside>
+<main>
+<section class="card" id="generator">
+<h1>Generador de Addons</h1><div class="sub">Genera, revisa y empaqueta Behavior Packs y Resource Packs para Minecraft Bedrock.</div>
+<div class="tip">Esta versión corrige manifiestos JSON mal formados por la IA y valida los archivos antes de empaquetarlos. La revisión estructural no sustituye una prueba dentro de Minecraft.</div>
+<div class="grid">
+<div><label>Proveedor de IA</label><input value="Groq API" readonly></div>
+<div><label for="pack-type">Formato de descarga</label><select id="pack-type"><option value="mcpack">.mcpack</option><option value="mcaddon">.mcaddon</option></select></div>
+<div><label for="keep-achievements">Metadata del addon</label><select id="keep-achievements"><option value="yes">Añadir metadata.product_type: addon</option><option value="no">No añadir metadata</option></select></div>
+<div><label for="engine-version">Versión objetivo de Bedrock</label><input id="engine-version" value="1.21.0"></div>
+</div>
+<div class="grid">
+<div><label for="api-key">Clave API de Groq</label><div class="row"><input id="api-key" type="password" autocomplete="off" placeholder="Pega tu clave de Groq"><button class="secondary" id="toggle-api">Mostrar</button></div>
+<div class="tip">La clave se guarda en el almacenamiento local de este navegador (no está cifrada). Evita usar este archivo en dispositivos compartidos.</div>
+<div class="actions"><button class="success" id="save-api">Guardar API</button><button class="danger" id="delete-api">Borrar API</button></div></div>
+<div><label for="model-select">Modelo elegido automáticamente</label><input id="model-select" type="text" readonly placeholder="Se elige solo al generar, o pulsa el botón"><button class="secondary full" type="button" id="refresh-models">Buscar el mejor modelo de mi API</button><div class="tip" id="model-explanation">Consulta el catálogo de tu cuenta y elige un modelo general compatible. La selección es heurística, no una prueba de rendimiento.</div></div>
+</div>
+<label for="prompt">Describe tu addon</label><textarea id="prompt" class="prompt" placeholder="Ejemplo: crea un addon con aldeanos que tengan animaciones al caminar, trabajar y saludar."></textarea>
+<div id="gemini-key-setup" class="validation-box hidden" style="margin-top:14px">
+ <h3>🔊 Gemini TTS: clave API necesaria para generar voces</h3>
+ <div class="tip">Esta sección solo aparece cuando tu solicitud pide voces, diálogos hablados o sonidos. Si el addon no necesita audio, Gemini no se utiliza.</div>
+ <label for="gemini-api-key-generator" style="margin-top:12px">Clave API de Gemini (Google AI Studio)</label>
+ <div class="row"><input id="gemini-api-key-generator" type="password" autocomplete="off" placeholder="Pega aquí tu clave API de Gemini"><button class="secondary" id="toggle-gemini-generator" type="button">Mostrar</button></div>
+ <div class="actions"><button class="success" id="save-gemini-generator" type="button">Guardar API de Gemini</button><button class="danger" id="delete-gemini-generator" type="button">Borrar API de Gemini</button></div>
+ <div class="tip">La clave se guarda localmente en este navegador. También se usará en la sección de generación de audios del editor.</div>
+</div>
+<button class="primary full" id="generate">Generar addon y abrir editor</button><div id="status" class="status" role="status"></div>
+</section>
+<section class="card" id="editor">
+<h1>Editor de archivos</h1><div class="sub">Selecciona un archivo, edítalo y guarda los cambios antes de empaquetar.</div>
+<div class="tabs" id="file-tabs"></div><label id="current-file-name" for="json-editor">Archivo</label><textarea id="json-editor" spellcheck="false"></textarea>
+<div class="actions"><button class="success" id="save-file">Guardar archivo</button><button class="secondary" id="save-project">Guardar proyecto</button><button class="secondary" id="back">Volver al generador</button><button class="primary" id="pack-download">Empaquetar y descargar</button></div>
+<div id="editor-status" class="status"></div><div class="actions"><button class="secondary" id="validate-addon">🔎 Revisar addon</button></div>
+<div id="validation-report" class="validation-box hidden" aria-live="polite"></div>
+<div id="pack-choice-wrap" class="pack-select hidden"><label for="pack-choice">Pack que quieres exportar como .mcpack</label><select id="pack-choice"></select><div class="tip">Si tu addon tiene Behavior Pack y Resource Pack, exporta cada uno por separado como .mcpack o descarga el conjunto como .mcaddon.</div></div>
+
+<div class="validation-box hidden" id="tts-panel" style="margin-top:22px">
+ <h3>🔊 Voces reales para los diálogos (Gemini TTS)</h3>
+ <div class="tip">Gemini genera audio; el generador lo convierte a OGG Vorbis y lo agrega al Resource Pack. Cada línea consume una solicitud de audio. Necesitas una clave Gemini con acceso a TTS.</div>
+ <label for="gemini-api-key" style="margin-top:14px">Clave API de Gemini</label>
+ <div class="row"><input id="gemini-api-key" type="password" autocomplete="off" placeholder="Pega tu clave de Google AI Studio"><button class="secondary" id="toggle-gemini-key" type="button">Mostrar</button></div>
+ <div class="actions"><button class="success" id="save-gemini-key" type="button">Guardar clave Gemini</button><button class="danger" id="delete-gemini-key" type="button">Borrar clave</button></div>
+ <div class="grid" style="margin-top:14px">
+  <div><label for="tts-model">Modelo de voz</label><select id="tts-model"><option value="gemini-3.8-flash-tts">Gemini 3.8 Flash TTS (calidad)</option><option value="gemini-3.8-flash-lite-tts">Gemini 3.8 Flash-Lite TTS (ligero)</option></select></div>
+  <div><label for="tts-style">Estilo de voz</label><select id="tts-style"><option value="natural, friendly, conversational Mexican Spanish">Natural y amistoso</option><option value="cheerful, expressive, lively Mexican Spanish">Alegre y expresivo</option><option value="calm, warm, gentle Mexican Spanish">Tranquilo y cálido</option><option value="old, slightly raspy, humorous villager voice speaking Mexican Spanish">Aldeano mayor y gracioso</option></select></div>
+  <div><label for="tts-voice-a">Voz A (predeterminada Puck)</label><select id="tts-voice-a"><option value="Puck">Puck</option><option value="Charon">Charon</option><option value="Fenrir">Fenrir</option><option value="Orus">Orus</option><option value="Iapetus">Iapetus</option></select></div>
+  <div><label for="tts-voice-b">Voz B (predeterminada Kore)</label><select id="tts-voice-b"><option value="Kore">Kore</option><option value="Aoede">Aoede</option><option value="Leda">Leda</option><option value="Zephyr">Zephyr</option><option value="Autonoe">Autonoe</option></select></div>
+  <div><label for="tts-gap">Espera entre tandas de 3 audios (segundos)</label><input id="tts-gap" type="number" min="0" max="300" value="60"><div class="tip">Genera 3 audios, espera este tiempo (60 s = 1 minuto) y sigue con los siguientes 3.</div></div>
+ </div>
+ <label for="tts-dialogues">Diálogos (uno por línea; alternará Voz A y Voz B)</label>
+ <textarea id="tts-dialogues" style="min-height:170px" placeholder="¡Buenos días, vecino!&#10;¿Has visto algún golem por aquí?&#10;Me encanta trabajar en mi huerto."></textarea>
+ <div class="actions"><button class="secondary" id="extract-dialogues" type="button">Detectar diálogos en los archivos</button><button class="primary" id="generate-voices" type="button">Generar voces OGG y añadir al pack</button></div>
+ <div id="tts-status" class="status" role="status"></div>
+ <div class="tip">Los sonidos se guardan en ResourcePack/sounds/voices/ y se registran en sounds/sound_definitions.json. El addon también debe invocar los eventos villager_voice.dialogue_001, villager_voice.dialogue_002, etc.; el generador crea el mapa para conectarlos con la lógica de diálogo.</div>
+</div>
+</section>
+</main>
+<script>
+(() => {
+'use strict';
+const $=id=>document.getElementById(id),sidebar=$('sidebar'),generator=$('generator'),editor=$('editor');
+let addonFiles={},currentFile='',projects=[];
+let currentAddonNeedsAudio=false;
+const isText=v=>typeof v==='string';
+
+function requestedDialogueCount(description){
+ const text=String(description||'');
+ const m1=text.match(/(\d{1,3})\s*(?:di[aá]logos?|frases|l[ií]neas)\b/i);
+ if(m1)return Math.max(1,Math.min(100,Number(m1[1])));
+ const words={diez:10,veinte:20,treinta:30,cuarenta:40,cincuenta:50,sesenta:60,setenta:70,ochenta:80,noventa:90,cien:100};
+ const m2=text.match(/\b(cien|noventa|ochenta|setenta|sesenta|cincuenta|cuarenta|treinta|veinte|diez)\s*(?:di[aá]logos?|frases)\b/i);
+ if(m2)return words[m2[1].toLowerCase()]||20;
+ return 20;
+}
+
+const DIALOGUE_SYSTEM='Eres guionista de videojuegos. Devuelves ÚNICAMENTE un objeto JSON válido con esta forma exacta: {"dialogues":["frase 1","frase 2"]}. Sin Markdown, sin explicaciones, sin texto extra.';
+async function generateDialoguesInBatches(key,description,total){
+ const all=[],seen=new Set(),batchSize=10;
+ for(let start=0;start<total;start+=batchSize){
+  const want=Math.min(batchSize,total-start);
+  let got=[];
+  for(let round=0;round<3&&got.length<want;round++){
+   const need=want-got.length;
+   showStatus('status',`Generando diálogos ${start+got.length+1}–${start+want} de ${total} con Groq…`);
+   const prompt=`Crea exactamente ${need} diálogos breves, naturales y diferentes en español mexicano para este addon de Minecraft Bedrock: ${description}. Son frases que diría un aldeano. No incluyas etiquetas de personaje, números ni explicaciones. Devuelve ÚNICAMENTE JSON válido: {"dialogues":["frase 1","frase 2"]}. Cada frase debe tener entre 5 y 18 palabras.${all.length?' No repitas estas: '+all.slice(-12).join(' | '):''}`;
+   const raw=await callGroq(key,prompt,{system:DIALOGUE_SYSTEM,user:prompt,maxTokens:2500,validate:r=>{const o=extractJSON(r);if(!Array.isArray(o.dialogues))throw new Error('falta la lista dialogues')}});
+   const obj=extractJSON(raw);
+   for(const x of obj.dialogues){
+    if(typeof x!=='string')continue;
+    const t=x.trim();
+    if(t&&!seen.has(t.toLowerCase())&&got.length<want){seen.add(t.toLowerCase());got.push(t)}
+   }
+  }
+  all.push(...got);
+ }
+ if(!all.length)throw new Error('Groq no devolvió diálogos utilizables.');
+ return all;
+}
+
+function requestNeedsAudio(text){return /\baudios?\b|\bsonidos?\b|\bvoz\b|\bvoces\b|di[aá]logos? hablados?|locuci[oó]n|voice.?over|\btts\b|\.ogg|\.wav|\.mp3/i.test(String(text||''));}
+function projectHasAudio(){return Object.keys(addonFiles).some(p=>/\.(ogg|wav|mp3)$/i.test(p)||/sound_definitions|villager_voice_map/i.test(p));}
+function updateTtsVisibility(show){$('tts-panel').classList.toggle('hidden',!show);}
+
+try{projects=JSON.parse(localStorage.getItem('bedrock_projects')||'[]');if(!Array.isArray(projects))projects=[]}catch{projects=[]}
+function persistProjects(){try{localStorage.setItem('bedrock_projects',JSON.stringify(projects));return true}catch{return false}}
+const savedKey=localStorage.getItem('bedrock_api_key');if(savedKey)$('api-key').value=savedKey;
+const savedGeminiKey=localStorage.getItem('bedrock_gemini_api_key');if(savedGeminiKey){$('gemini-api-key').value=savedGeminiKey;$('gemini-api-key-generator').value=savedGeminiKey;}
+$('prompt').addEventListener('input',()=>{$('gemini-key-setup').classList.toggle('hidden',!requestNeedsAudio($('prompt').value));});
+$('toggle-gemini-generator').onclick=()=>{const el=$('gemini-api-key-generator');el.type=el.type==='password'?'text':'password';$('toggle-gemini-generator').textContent=el.type==='password'?'Mostrar':'Ocultar'};
+$('save-gemini-generator').onclick=()=>{const k=$('gemini-api-key-generator').value.trim();if(!k)return alert('Pega primero tu clave de Gemini.');localStorage.setItem('bedrock_gemini_api_key',k);$('gemini-api-key').value=k;showStatus('status','Clave API de Gemini guardada. Solo se usará si el addon necesita audio.','good')};
+$('delete-gemini-generator').onclick=()=>{localStorage.removeItem('bedrock_gemini_api_key');$('gemini-api-key-generator').value='';$('gemini-api-key').value='';showStatus('status','Clave API de Gemini eliminada.','good')};
+$('gemini-api-key-generator').addEventListener('input',()=>{$('gemini-api-key').value=$('gemini-api-key-generator').value});
+$('menu-toggle').onclick=()=>sidebar.classList.toggle('open');
+$('toggle-api').onclick=()=>{const el=$('api-key');el.type=el.type==='password'?'text':'password';$('toggle-api').textContent=el.type==='password'?'Mostrar':'Ocultar'};
+$('save-api').onclick=()=>{const key=$('api-key').value.trim();if(!key)return alert('Primero pega una clave API.');localStorage.setItem('bedrock_api_key',key);showStatus('status','Clave guardada en este navegador.','good')};
+$('delete-api').onclick=()=>{localStorage.removeItem('bedrock_api_key');$('api-key').value='';$('model-select').value='';$('model-select').dataset.model='';showStatus('status','Clave guardada eliminada.','good')};
+$('refresh-models').onclick=()=>loadAvailableModels();
+$('api-key').addEventListener('change',()=>{$('model-select').value='';$('model-select').dataset.model='';$('model-select').dataset.candidates='';$('model-explanation').textContent='La clave cambió. Se buscará de nuevo el mejor modelo disponible.'});
+function showStatus(id,msg,type=''){const el=$(id);el.textContent=msg;el.className='status '+type;el.style.display='block'}
+function hideStatus(id){$(id).style.display='none'}
+function extractJSON(text){
+ let s=String(text||'').trim().replace(/^```(?:json)?\s*/i,'').replace(/\s*```$/,'').trim();
+ const first=s.indexOf('{'),last=s.lastIndexOf('}');
+ if(first<0||last<first)throw new Error('La IA no devolvió un objeto JSON válido.');
+ s=s.slice(first,last+1);
+ try{return JSON.parse(s)}catch(e){throw new Error('El objeto JSON principal de la respuesta está mal formado: '+e.message)}
+}
+/* Acepta: {ruta:"texto"}, {ruta:{objeto}}, {files:{...}} y [{path,content}]. */
+function normalizeFiles(obj){
+ if(obj&&typeof obj==='object'&&!Array.isArray(obj)){
+  const keys=Object.keys(obj);
+  if(keys.length===1&&obj[keys[0]]&&typeof obj[keys[0]]==='object'&&/^(files|archivos)$/i.test(keys[0]))obj=obj[keys[0]];
+ }
+ let entries;
+ if(Array.isArray(obj))entries=obj.filter(x=>x&&typeof x==='object'&&typeof(x.path||x.name)==='string').map(x=>[x.path||x.name,x.content??x.text??'']);
+ else if(obj&&typeof obj==='object')entries=Object.entries(obj);
+ else throw new Error('La respuesta debe ser un objeto con rutas de archivo y contenido.');
+ const out={};
+ for(const [name,value] of entries){
+  let text;
+  if(typeof value==='string')text=value;
+  else if(value&&typeof value==='object')text=JSON.stringify(value,null,2);
+  else continue;
+  const clean=String(name).replace(/\\/g,'/').replace(/^(\.?\/)+/,'').replace(/(\.\.\/)+/g,'');
+  if(clean&&!clean.endsWith('/'))out[clean]=text;
+ }
+ if(!Object.keys(out).length)throw new Error('No se encontraron archivos en la respuesta.');
+ return out;
+}
+const SYSTEM_PROMPT=`Eres desarrollador experto de Add-Ons para Minecraft Bedrock. Devuelve ÚNICAMENTE un objeto JSON válido: cada clave es una ruta de archivo y cada valor es su contenido textual como string. Dentro de cada string manifest.json también debe haber JSON ESTRICTO: todas las claves y cadenas con comillas dobles, sin comentarios ni comas finales. IMPORTANTE: product_type NUNCA va como propiedad raíz del manifest. La estructura "metadata": { "product_type": "addon" } va ÚNICAMENTE en BehaviorPack/manifest.json y debe ser la última propiedad del objeto manifest. NO la incluyas en ResourcePack/manifest.json. Si se solicita metadata de addon, la estructura exacta es: "metadata": { "product_type": "addon" }. Ejemplo: {"format_version":2,"header":{"name":"Ejemplo","description":"Ejemplo","uuid":"00000000-0000-4000-8000-000000000001","version":[1,0,0],"min_engine_version":[1,21,0]},"modules":[{"type":"data","uuid":"00000000-0000-4000-8000-000000000002","version":[1,0,0]}],"metadata":{"product_type":"addon"}}. Reglas: manifests format_version 2; usa BehaviorPack/manifest.json y ResourcePack/manifest.json si necesitas ambos; BP module type=data y RP type=resources; cada manifest lleva header y modules; UUID v4 únicos; dependencies solo con UUID real del otro pack; referencias a archivos existentes; no inventes componentes/APIs; no simules archivos PNG/OGG como texto; documenta recursos binarios pendientes en README.txt. No uses APIs experimentales salvo petición explícita. Devuelve solo JSON, sin Markdown.`;
+function scoreGroqModel(m){
+ const id=String(m.id||'').toLowerCase(),ctx=Number(m.context_window||0);let s=0;
+ if(/gpt-oss-120b/.test(id))s=1200;else if(/llama-4-maverick/.test(id))s=1150;else if(/llama-3\.3-70b/.test(id))s=1100;else if(/qwen.*(32b|coder)/.test(id))s=1050;else if(/deepseek.*(r1|v3|coder)/.test(id))s=1040;else if(/gpt-oss-20b/.test(id))s=1000;else if(/70b|72b|90b|120b/.test(id))s=900;else if(/32b|34b|40b/.test(id))s=800;else if(/8b|7b|mini|small/.test(id))s=500;else s=650;
+ s+=Math.min(ctx/1000,200);if(/preview|experimental|instant|versatile/.test(id))s-=20;if(m.active===false)s-=10000;return s;
+}
+async function loadAvailableModels(silent=false){
+ const key=$('api-key').value.trim();if(!key){alert('Primero pega tu clave API de Groq.');return false}
+ const btn=$('refresh-models'),field=$('model-select');btn.disabled=true;btn.textContent='Analizando modelos…';field.value='Consultando modelos…';
+ try{
+  const res=await fetch('https://api.groq.com/openai/v1/models',{headers:{Authorization:'Bearer '+key}});
+  const data=await res.json().catch(()=>({}));if(!res.ok)throw new Error(data.error?.message||'Groq rechazó la consulta ('+res.status+').');
+  const models=(data.data||[]).filter(m=>m.active!==false&&m.id&&!/whisper|guard|embed|speech|tts|moderation|orpheus|compound|playai|distil-whisper|allam/i.test(m.id)).sort((a,b)=>scoreGroqModel(b)-scoreGroqModel(a));
+  if(!models.length)throw new Error('Groq no devolvió modelos generales compatibles.');
+  const best=models[0];field.value=best.id;field.dataset.model=best.id;
+  field.dataset.candidates=JSON.stringify(models.slice(0,6).map(m=>({id:m.id,max_completion_tokens:Number(m.max_completion_tokens||0)})));
+  $('model-explanation').textContent='Elegido entre '+models.length+' modelos del catálogo: '+best.id+'. Se guardaron alternativas para cambiar automáticamente si Groq aplica un límite.';
+  if(!silent)showStatus('status','Modelo seleccionado: '+best.id,'good');
+  return true;
+ }catch(e){field.value='No se pudo elegir un modelo';field.dataset.model='';showStatus('status','Error al buscar modelos: '+e.message,'error');return false}
+ finally{btn.disabled=false;btn.textContent='Buscar el mejor modelo de mi API'}
+}
+// "try again in 1h2m3.5s" / "7.2s" / "450ms" -> segundos (null si no hay dato)
+function parseWait(msg){
+ const m=String(msg).match(/try again in\s+(?:(\d+)h)?(?:(\d+)m(?!s))?(?:([\d.]+)s)?/i);
+ if(!m)return null;
+ return Number(m[1]||0)*3600+Number(m[2]||0)*60+Number(m[3]||0);
+}
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+async function callGroq(key,prompt,opts={}){
+ const field=$('model-select'),selected=field.dataset.model||'';
+ if(!selected)throw new Error('Primero pulsa «Buscar el mejor modelo de mi API».');
+ let candidates=[];
+ try{candidates=JSON.parse(field.dataset.candidates||'[]')}catch{}
+ if(!candidates.length)candidates=[{id:selected,max_completion_tokens:0}];
+ candidates=[...candidates].sort((a,b)=>(a.id===selected?-1:0)-(b.id===selected?-1:0));
+ const endpoint='https://api.groq.com/openai/v1/chat/completions';
+ const headers={'Content-Type':'application/json',Authorization:'Bearer '+key};
+ const system=opts.system||(SYSTEM_PROMPT+' Conserva todos los requisitos solicitados. Usa JSON compacto, sin espacios ni saltos innecesarios, para ahorrar tokens; no omitas archivos ni contenido solicitado.');
+ const userMsg=opts.user||(prompt+'\n\nIMPORTANTE: devuelve el objeto JSON completo y compacto.');
+ const validate=opts.validate||(r=>extractJSON(r));
+ const maxOut=opts.maxTokens||16000;
+ const messages=[{role:'system',content:system},{role:'user',content:userMsg}];
+ const errors=[];
+ for(const candidate of candidates){
+  const model=candidate.id;
+  // IMPORTANTE: Groq cuenta max_completion_tokens dentro del límite de tokens por minuto.
+  // Pedir el máximo del modelo provoca errores 413/429 constantes, así que se limita.
+  let outTokens=Math.min(candidate.max_completion_tokens>0?candidate.max_completion_tokens:maxOut,maxOut);
+  let jsonMode=true,rateRetries=0,shrinks=0,data=null,ok=false;
+  for(let attempt=0;attempt<8;attempt++){
+   const body={model,temperature:0.1,messages,max_completion_tokens:outTokens};
+   if(jsonMode)body.response_format={type:'json_object'};
+   if(/gpt-oss/i.test(model))body.reasoning_effort='low';
+   let res;
+   try{
+    res=await fetch(endpoint,{method:'POST',headers,body:JSON.stringify(body)});
+    data=await res.json().catch(()=>({}));
+   }catch(e){throw new Error('No se pudo conectar con Groq: '+e.message)}
+   if(res.ok){ok=true;break}
+   const msg=data.error?.message||'Error de Groq ('+res.status+').';
+   const code=String(data.error?.code||'');
+   if(res.status===401||res.status===403)throw new Error('Groq no aceptó tu API Key. '+msg);
+   // Solicitud demasiado grande para el TPM: reducir la salida pedida y reintentar.
+   const lim=msg.match(/Limit\s+(\d+)/i),req=msg.match(/Requested\s+(\d+)/i),used=msg.match(/Used\s+(\d+)/i);
+   if((res.status===413||res.status===429)&&lim&&req&&(!used||Number(used[1])===0)&&/token/i.test(msg)){
+    const next=Math.floor(outTokens-(Number(req[1])-Number(lim[1]))-300);
+    if(next>=1200&&shrinks<3){outTokens=next;shrinks++;showStatus('status',`${model}: ajustando salida a ${outTokens} tokens por límite de Groq…`);continue}
+    errors.push(model+': la solicitud excede el límite de tu plan ('+msg+')');break;
+   }
+   if(res.status===429){
+    const wait=parseWait(msg);
+    if(wait!==null&&wait>45){errors.push(model+': límite alcanzado, espera ~'+Math.ceil(wait/60)+' min');break}
+    if(rateRetries>=2){errors.push(model+': límite temporal tras 2 esperas');break}
+    rateRetries++;
+    const secs=Math.max(2,(wait??10)+1.2);
+    showStatus('status',`Groq alcanzó su límite temporal. Reintentando ${rateRetries}/2 en ${Math.ceil(secs)} s…`);
+    await sleep(secs*1000);continue;
+   }
+   if(jsonMode&&/response_format|json_object|json mode|failed to generate json|failed_generation|json_validate_failed/i.test(msg+' '+code)){jsonMode=false;continue}
+   errors.push(model+': '+msg);break;
+  }
+  if(!ok)continue;
+  const choice=data.choices?.[0],result=choice?.message?.content;
+  if(choice?.finish_reason==='length'){errors.push(model+': la respuesta se cortó por límite de tokens');continue}
+  if(!result){errors.push(model+': respuesta vacía');continue}
+  try{
+   validate(result);
+   if(model!==selected){field.value=model;field.dataset.model=model;showStatus('status','Se cambió automáticamente al modelo '+model+'.','good')}
+   return result;
+  }catch(e){errors.push(model+': respuesta incompleta o JSON inválido ('+e.message+')');continue}
+ }
+ throw new Error('Ningún modelo pudo completar la respuesta. Intentos: '+errors.join(' | ')+'.');
+}
+/* Parser tolerante SOLO para manifests. */
+function parseManifest(text){
+ let s=String(text||'').trim().replace(/^```(?:json)?\s*/i,'').replace(/\s*```$/i,'').trim();
+ const a=s.indexOf('{'),b=s.lastIndexOf('}');if(a<0||b<a)throw new Error('No contiene un objeto JSON.');s=s.slice(a,b+1);
+ try{return JSON.parse(s)}catch(strictError){
+  const repaired=s.replace(/([{,]\s*)([A-Za-z_$][\w$-]*)(\s*:)/g,'$1"$2"$3').replace(/,\s*([}\]])/g,'$1');
+  try{return JSON.parse(repaired)}catch{throw new Error('JSON inválido incluso después de reparar. '+strictError.message)}
+ }
+}
+function makeUUID(){
+ if(globalThis.crypto?.randomUUID)return crypto.randomUUID();
+ const bytes=new Uint8Array(16);crypto.getRandomValues(bytes);
+ bytes[6]=(bytes[6]&0x0f)|0x40;bytes[8]=(bytes[8]&0x3f)|0x80;
+ const h=[...bytes].map(x=>x.toString(16).padStart(2,'0')).join('');
+ return `${h.slice(0,8)}-${h.slice(8,12)}-${h.slice(12,16)}-${h.slice(16,20)}-${h.slice(20)}`;
+}
+function isValidUUID(v){return typeof v==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v)}
+const fixVer=v=>Array.isArray(v)&&v.length===3&&v.every(Number.isInteger)?v:[1,0,0];
+function applyAchievementSetting(files){
+ const manifestKeys=Object.keys(files).filter(k=>k.toLowerCase().split('/').pop()==='manifest.json');
+ if(!manifestKeys.length)throw new Error('Groq no generó ningún manifest.json.');
+ let foundBP=false;
+ const manifests=[],uuidMap=new Map(),used=new Set();
+ const eng=($('engine-version').value.trim().match(/^(\d+)\.(\d+)\.(\d+)$/)||[]).slice(1).map(Number);
+ for(const path of manifestKeys){
+  const manifest=parseManifest(files[path]);
+  if(!manifest||typeof manifest!=='object'||Array.isArray(manifest))throw new Error(path+': el manifiesto no es un objeto.');
+  if(!manifest.header||!Array.isArray(manifest.modules))throw new Error(path+': faltan header o modules.');
+  manifest.format_version=2;
+  manifest.header.version=fixVer(manifest.header.version);
+  manifest.modules.forEach(m=>{m.version=fixVer(m.version)});
+  (manifest.dependencies||[]).forEach(d=>{if(d&&d.uuid)d.version=fixVer(d.version)});
+  if(eng.length===3)manifest.header.min_engine_version=eng;
+  else if(!Array.isArray(manifest.header.min_engine_version)||manifest.header.min_engine_version.length!==3)manifest.header.min_engine_version=[1,21,0];
+  manifests.push({path,manifest});
+ }
+ for(const {manifest} of manifests){
+  const declared=[manifest.header.uuid,...manifest.modules.map(m=>m.uuid)];
+  for(let i=0;i<declared.length;i++){
+   const oldUUID=declared[i];
+   if(isValidUUID(oldUUID)&&!used.has(oldUUID.toLowerCase())){used.add(oldUUID.toLowerCase());continue}
+   let fresh;do{fresh=makeUUID()}while(used.has(fresh.toLowerCase()));
+   used.add(fresh.toLowerCase());
+   if(i===0)manifest.header.uuid=fresh;else manifest.modules[i-1].uuid=fresh;
+   if(typeof oldUUID==='string'&&!uuidMap.has(oldUUID.toLowerCase()))uuidMap.set(oldUUID.toLowerCase(),fresh);
+  }
+ }
+ const reorder=(manifest,meta)=>{delete manifest.metadata;if(meta&&Object.keys(meta).length)manifest.metadata=meta};
+ for(const {path,manifest} of manifests){
+  const isBP=(manifest.modules||[]).some(m=>['data','script','javascript'].includes(String(m.type||'').toLowerCase()))||/behavior|(^|\/)bp/i.test(path);
+  if(Object.prototype.hasOwnProperty.call(manifest,'product_type')){
+   const root=manifest.product_type;delete manifest.product_type;
+   if(isBP&&!manifest.metadata?.product_type&&root==='addon')manifest.metadata={...(manifest.metadata||{}),product_type:'addon'};
+  }
+  if(isBP){
+   foundBP=true;
+   const meta={...(manifest.metadata||{})};
+   if($('keep-achievements').value==='yes')meta.product_type='addon';else delete meta.product_type;
+   reorder(manifest,meta);
+  }else{
+   const meta={...(manifest.metadata||{})};delete meta.product_type;reorder(manifest,meta);
+  }
+  (manifest.dependencies||[]).forEach(dep=>{if(typeof dep.uuid==='string'&&uuidMap.has(dep.uuid.toLowerCase()))dep.uuid=uuidMap.get(dep.uuid.toLowerCase())});
+  files[path]=JSON.stringify(manifest,null,2);
+ }
+ if(!foundBP)throw new Error('No se identificó el manifest del Behavior Pack (módulo data/script).');
+}
+function findBPPrefix(){
+ const p=Object.keys(addonFiles).find(p=>p.toLowerCase().endsWith('manifest.json')&&isText(addonFiles[p])&&(()=>{try{return JSON.parse(addonFiles[p]).modules?.some(m=>['data','script','javascript'].includes(String(m.type).toLowerCase()))}catch{return false}})());
+ return p===undefined?null:p.slice(0,p.lastIndexOf('/')+1);
+}
+function findRPPrefix(){
+ const p=Object.keys(addonFiles).find(p=>p.toLowerCase().endsWith('manifest.json')&&isText(addonFiles[p])&&(()=>{try{return JSON.parse(addonFiles[p]).modules?.some(m=>m.type==='resources')}catch{return false}})());
+ return p===undefined?null:p.slice(0,p.lastIndexOf('/')+1);
+}
+$('generate').onclick=async()=>{
+ const key=$('api-key').value.trim(),description=$('prompt').value.trim();currentAddonNeedsAudio=requestNeedsAudio(description);
+ if(!key||!description){alert('Falta la clave API o la descripción del addon.');return}
+ const btn=$('generate');btn.disabled=true;btn.textContent='Generando…';
+ try{
+  if(!$('model-select').dataset.model){
+   showStatus('status','Buscando el mejor modelo de tu cuenta…');
+   if(!await loadAvailableModels(true))return;
+  }
+  const dialogueCount=currentAddonNeedsAudio?requestedDialogueCount(description):0;
+  const audioRule=currentAddonNeedsAudio
+   ?`La solicitud SÍ requiere voz/audio. IMPORTANTE: NO escribas una lista larga de diálogos dentro de la respuesta principal. Crea solamente la estructura básica del addon (incluye Resource Pack) y deja los diálogos para un archivo separado que añadirá el generador. NO inventes archivos .ogg ni sonido binario.`
+   :'La solicitud NO pide audio, voces ni sonidos: NO generes archivos de sonido, sound_definitions, mapas de voces ni referencias a .ogg/.wav/.mp3.';
+  const request=`Genera SOLO los archivos esenciales y completos necesarios para esta solicitud, usando rutas BehaviorPack/ y ResourcePack/ cuando hagan falta ambos. Mantén la respuesta compacta: sin ejemplos, documentación extensa ni grandes listas de datos.\n${audioRule}\nMetadata product_type addon: ${$('keep-achievements').value}.\nVersión objetivo de Bedrock: ${$('engine-version').value.trim()||'1.21.0'}.\nSolicitud: ${description}\nLa respuesta externa debe ser un único objeto JSON válido. Cada manifest.json debe ser JSON estricto dentro de su string. No inventes archivos binarios.`;
+  showStatus('status',currentAddonNeedsAudio?'Creando estructura del addon; después generaré los diálogos por tandas…':'Conectando con Groq y generando archivos…');
+  const raw=await callGroq(key,request);
+  addonFiles=normalizeFiles(extractJSON(raw));
+  applyAchievementSetting(addonFiles);
+  let madeDialogues=0;
+  if(currentAddonNeedsAudio&&dialogueCount>0){
+   const dialogues=await generateDialoguesInBatches(key,description,dialogueCount);
+   madeDialogues=dialogues.length;
+   const bpPrefix=findBPPrefix();
+   if(bpPrefix===null)throw new Error('Groq no creó un Behavior Pack válido; no puedo añadir los diálogos.');
+   addonFiles[bpPrefix+'dialogues.json']=JSON.stringify({format_version:1,dialogues},null,2);
+  }
+  currentFile='';
+  renderTabs();refreshPackChoices();openFile(Object.keys(addonFiles).sort()[0]);updateTtsVisibility(currentAddonNeedsAudio);
+  if(currentAddonNeedsAudio){
+   $('tts-dialogues').value=collectDialogueStrings().join('\n');
+   showStatus('editor-status',`Addon creado. Se añadieron ${madeDialogues} de ${dialogueCount} diálogos. Revisa los textos y luego genera sus voces con Gemini TTS.`,'good');
+  }
+  generator.style.display='none';editor.style.display='block';hideStatus('status');
+ }catch(err){showStatus('status','Error: '+err.message,'error')}
+ finally{btn.disabled=false;btn.textContent='Generar addon y abrir editor'}
+};
+function renderTabs(){
+ const wrap=$('file-tabs');wrap.innerHTML='';
+ Object.keys(addonFiles).sort().forEach(name=>{
+  const b=document.createElement('button');b.className='tab'+(name===currentFile?' active':'');
+  b.textContent=(isText(addonFiles[name])?'':'🔊 ')+name;b.title=name;
+  b.onclick=()=>{saveCurrent(false);openFile(name)};wrap.appendChild(b);
+ });
+}
+function openFile(name){
+ currentFile=name;$('current-file-name').textContent=name;
+ const v=addonFiles[name],ed=$('json-editor');
+ if(isText(v)){ed.readOnly=false;ed.value=v}
+ else{ed.readOnly=true;ed.value=`[Archivo binario: ${v?.length||0} bytes. No se puede editar como texto, pero sí se incluirá al empaquetar.]`}
+ renderTabs();
+}
+function saveCurrent(show=true){
+ if(!currentFile)return;
+ if(!isText(addonFiles[currentFile]))return; // nunca convertir binarios (OGG) a texto
+ addonFiles[currentFile]=$('json-editor').value;
+ if(show)showStatus('editor-status','Guardado: '+currentFile,'good');
+}
+$('save-file').onclick=()=>saveCurrent(true);
+$('save-project').onclick=()=>{
+ saveCurrent(false);const name=prompt('Nombre para guardar este proyecto:');if(!name?.trim())return;
+ const files={};let skipped=0;
+ for(const [k,v] of Object.entries(addonFiles)){if(isText(v))files[k]=v;else skipped++}
+ projects.push({name:name.trim(),summary:Object.keys(files).length+' archivos'+(skipped?` (+${skipped} audios no guardados)`:''),files});
+ if(!persistProjects()){projects.pop();showStatus('editor-status','No se pudo guardar: el almacenamiento del navegador está lleno. Descarga el addon con «Empaquetar».','error');return}
+ renderProjects();
+ showStatus('editor-status',skipped?`Proyecto guardado. Los ${skipped} audios no se guardan en el navegador: descarga el paquete para conservarlos.`:'Proyecto guardado en este navegador.','good');
+};
+$('back').onclick=()=>{saveCurrent(false);editor.style.display='none';generator.style.display='block';$('gemini-key-setup').classList.toggle('hidden',!requestNeedsAudio($('prompt').value));hideStatus('editor-status')};
+function getManifestEntries(){return Object.keys(addonFiles).filter(p=>p.toLowerCase().split('/').pop()==='manifest.json').sort()}
+function refreshPackChoices(){const manifests=getManifestEntries(),wrap=$('pack-choice-wrap'),sel=$('pack-choice');sel.innerHTML='';manifests.forEach(path=>{const o=document.createElement('option');o.value=path;o.textContent=path;sel.appendChild(o)});wrap.classList.toggle('hidden',manifests.length<2)}
+function addIssue(list,type,message){list.push({type,message})}
+function validateAddon(){
+ saveCurrent(false);const issues=[],parsed=new Map(),uuidSeen=new Map(),paths=Object.keys(addonFiles);
+ if(!paths.length)addIssue(issues,'error','El proyecto no contiene archivos.');
+ for(const path of paths){if(!/\.json$/i.test(path)||!isText(addonFiles[path]))continue;try{parsed.set(path,JSON.parse(addonFiles[path]))}catch(e){addIssue(issues,'error',`${path}: JSON inválido (${e.message}).`)}}
+ const manifests=getManifestEntries();if(!manifests.length)addIssue(issues,'error','No se encontró ningún manifest.json.');
+ for(const path of manifests){
+  const m=parsed.get(path);if(!m)continue;
+  if(m.format_version!==2)addIssue(issues,'error',`${path}: usa format_version 2.`);
+  if(!m.header)addIssue(issues,'error',`${path}: falta header.`);
+  else{if(!m.header.name)addIssue(issues,'error',`${path}: falta header.name.`);if(!m.header.description)addIssue(issues,'warn',`${path}: falta header.description.`);if(!m.header.uuid)addIssue(issues,'error',`${path}: falta header.uuid.`);if(!Array.isArray(m.header.version)||m.header.version.length!==3)addIssue(issues,'error',`${path}: header.version debe tener tres números.`);if(!Array.isArray(m.header.min_engine_version)||m.header.min_engine_version.length!==3)addIssue(issues,'error',`${path}: falta min_engine_version [major,minor,patch].`)}
+  if(!Array.isArray(m.modules)||!m.modules.length)addIssue(issues,'error',`${path}: falta modules.`);
+  else m.modules.forEach((mod,i)=>{if(!mod.type)addIssue(issues,'error',`${path}: modules[${i}] no tiene type.`);if(!mod.uuid)addIssue(issues,'error',`${path}: modules[${i}] no tiene uuid.`);if(!Array.isArray(mod.version)||mod.version.length!==3)addIssue(issues,'error',`${path}: modules[${i}].version debe tener tres números.`);if(!['data','resources','script','world_template','skin_pack'].includes(mod.type))addIssue(issues,'error',`${path}: tipo de módulo no reconocido: ${mod.type}.`)});
+  const uuids=[m.header?.uuid,...(m.modules||[]).map(x=>x.uuid)].filter(Boolean);
+  uuids.forEach(uuid=>{if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(uuid))addIssue(issues,'error',`${path}: UUID inválido: ${uuid}`);if(uuidSeen.has(uuid))addIssue(issues,'error',`UUID duplicado ${uuid} en ${uuidSeen.get(uuid)} y ${path}.`);else uuidSeen.set(uuid,path)});
+  (m.dependencies||[]).forEach((dep,i)=>{if(!dep.uuid)addIssue(issues,'error',`${path}: dependencies[${i}] no tiene UUID.`);if(dep.uuid&&!uuidSeen.has(dep.uuid)&&![...parsed.values()].some(x=>x?.header?.uuid===dep.uuid))addIssue(issues,'warn',`${path}: dependencies[${i}] apunta a un UUID que no pertenece a ningún pack del proyecto.`);if(!Array.isArray(dep.version)||dep.version.length!==3)addIssue(issues,'warn',`${path}: dependencies[${i}].version debe tener tres números.`)});
+ }
+ if(!issues.length)addIssue(issues,'ok','No se encontraron problemas en las comprobaciones automáticas.');
+ const errors=issues.filter(x=>x.type==='error').length,warns=issues.filter(x=>x.type==='warn').length,box=$('validation-report');box.classList.remove('hidden');box.innerHTML='';
+ const h=document.createElement('h3');h.textContent='Resultado de la revisión';box.appendChild(h);
+ const sum=document.createElement('div');sum.className='validation-summary';sum.textContent=`${errors} error(es) · ${warns} advertencia(s) · ${issues.some(x=>x.type==='ok')?1:0} correcto(s)`;box.appendChild(sum);
+ const ul=document.createElement('ul');ul.className='validation-list';issues.forEach(x=>{const li=document.createElement('li');li.className=x.type;li.textContent=(x.type==='error'?'❌ ':x.type==='warn'?'⚠️ ':'✅ ')+x.message;ul.appendChild(li)});box.appendChild(ul);
+ showStatus('editor-status',errors?`Se encontraron ${errors} errores. Corrígelos antes de empaquetar.`:warns?`Revisión terminada: ${warns} advertencia(s).`:'Revisión terminada: no se detectaron errores automáticos.',errors?'error':'good');return{errors,warns};
+}
+$('validate-addon').onclick=()=>validateAddon();
+$('pack-download').onclick=async()=>{
+ saveCurrent(false);const btn=$('pack-download');btn.disabled=true;btn.textContent='Empaquetando…';
+ try{
+  if(typeof JSZip==='undefined')throw new Error('No se pudo cargar JSZip. Comprueba tu conexión.');
+  const check=validateAddon();if(check.errors)throw new Error('La revisión encontró errores. Corrígelos antes de empaquetar.');
+  const ext=$('pack-type').value,manifests=getManifestEntries();if(!manifests.length)throw new Error('No hay manifest.json.');
+  const makePackZip=async(manifestPath)=>{const prefix=manifestPath.includes('/')?manifestPath.slice(0,manifestPath.lastIndexOf('/')+1):'',zip=new JSZip();let count=0;for(const [path,content] of Object.entries(addonFiles)){if(path.startsWith(prefix)){const relative=path.slice(prefix.length);if(relative){zip.file(relative,content);count++}}}if(!count||!zip.file('manifest.json'))throw new Error('El pack '+manifestPath+' no contiene manifest.json en su raíz.');return await zip.generateAsync({type:'blob',compression:'DEFLATE',compressionOptions:{level:6}})};
+  let blob;if(ext==='mcpack'){const selected=manifests.length>1?$('pack-choice').value:manifests[0];if(!selected)throw new Error('Selecciona el pack.');blob=await makePackZip(selected)}
+  else{const zip=new JSZip();for(let i=0;i<manifests.length;i++){const m=JSON.parse(addonFiles[manifests[i]]),types=(m.modules||[]).map(x=>x.type),label=types.includes('resources')?'ResourcePack':types.includes('data')||types.includes('script')?'BehaviorPack':'Pack'+(i+1);zip.file(label+'.mcpack',await makePackZip(manifests[i]))}blob=await zip.generateAsync({type:'blob',compression:'DEFLATE',compressionOptions:{level:6}})}
+  const a=document.createElement('a'),url=URL.createObjectURL(blob);a.href=url;a.download='Addon_Bedrock.'+ext;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),2000);showStatus('editor-status','Paquete creado. Importa y prueba el addon en un mundo de prueba.','good');
+ }catch(e){showStatus('editor-status','Error al empaquetar: '+e.message,'error')}
+ finally{btn.disabled=false;btn.textContent='Empaquetar y descargar'}
+};
+
+// ---------------- Gemini TTS: audio -> OGG Vorbis ----------------
+$('toggle-gemini-key').onclick=()=>{const el=$('gemini-api-key');el.type=el.type==='password'?'text':'password';$('toggle-gemini-key').textContent=el.type==='password'?'Mostrar':'Ocultar'};
+$('save-gemini-key').onclick=()=>{const k=$('gemini-api-key').value.trim();if(!k)return alert('Pega primero tu clave de Gemini.');localStorage.setItem('bedrock_gemini_api_key',k);showStatus('tts-status','Clave Gemini guardada en este navegador.','good')};
+$('delete-gemini-key').onclick=()=>{localStorage.removeItem('bedrock_gemini_api_key');$('gemini-api-key').value='';showStatus('tts-status','Clave Gemini eliminada.','good')};
+
+function collectDialogueStrings(){
+ const found=[];
+ const ignore=/^(format_version|description|identifier|name|uuid|version|type|parent|texture|geometry|animation|sound|materials|render_controllers|minecraft:|query\.|variable\.)/i;
+ const visit=(v,k='')=>{
+  if(typeof v==='string'){
+   const t=v.trim();
+   if(t.length>=8&&t.length<=240&&/[a-záéíóúñü]/i.test(t)&&/\s/.test(t)&&!ignore.test(k)&&!/[{}$]/.test(t))found.push(t);
+  }else if(Array.isArray(v))v.forEach(x=>visit(x,k));
+  else if(v&&typeof v==='object')Object.entries(v).forEach(([key,val])=>visit(val,key));
+ };
+ for(const [path,content] of Object.entries(addonFiles)){
+  if(!isText(content)||!/\.(json|lang|txt)$/i.test(path))continue;
+  if(/manifest\.json$/i.test(path))continue;
+  try{visit(JSON.parse(content))}catch{
+   if(/\.lang$/i.test(path))content.split(/\r?\n/).forEach(line=>{const i=line.indexOf('=');if(i>=0)visit(line.slice(i+1),'dialogue')});
+  }
+ }
+ return [...new Set(found)].slice(0,120);
+}
+$('extract-dialogues').onclick=()=>{
+ saveCurrent(false);
+ const lines=collectDialogueStrings();
+ if(!lines.length){showStatus('tts-status','No encontré frases de diálogo automáticamente. Pega los diálogos en el cuadro, uno por línea.','error');return}
+ $('tts-dialogues').value=lines.join('\n');
+ showStatus('tts-status','Encontré '+lines.length+' frases candidatas. Revísalas antes de generar las voces.','good');
+};
+
+let oggEncoderPromise=null;
+function loadOggEncoder(){
+ if(window.OggVorbisEncoder)return Promise.resolve();
+ if(oggEncoderPromise)return oggEncoderPromise;
+ window.OggVorbisEncoderConfig={memoryInitializerPrefixURL:'https://cdn.jsdelivr.net/gh/higuma/ogg-vorbis-encoder-js@master/lib/'};
+ oggEncoderPromise=new Promise((resolve,reject)=>{
+  const script=document.createElement('script');
+  script.src='https://cdn.jsdelivr.net/gh/higuma/ogg-vorbis-encoder-js@master/lib/OggVorbisEncoder.min.js';
+  script.onload=()=>window.OggVorbisEncoder?resolve():reject(new Error('La biblioteca OGG se cargó pero no encontró OggVorbisEncoder.'));
+  script.onerror=()=>{oggEncoderPromise=null;reject(new Error('No se pudo descargar el codificador OGG. Comprueba tu conexión.'))};
+  document.head.appendChild(script);
+ });
+ return oggEncoderPromise;
+}
+function base64ToBytes(b64){
+ const bin=atob(b64),bytes=new Uint8Array(bin.length);
+ for(let i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i);
+ return bytes;
+}
+// Gemini suele devolver PCM crudo (16 bit, mono, 24 kHz) sin cabecera: se envuelve en WAV.
+function pcmToWav(pcm,rate=24000){
+ const h=new ArrayBuffer(44),v=new DataView(h);
+ const w=(o,s)=>{for(let i=0;i<s.length;i++)v.setUint8(o+i,s.charCodeAt(i))};
+ w(0,'RIFF');v.setUint32(4,36+pcm.length,true);w(8,'WAVEfmt ');v.setUint32(16,16,true);v.setUint16(20,1,true);v.setUint16(22,1,true);
+ v.setUint32(24,rate,true);v.setUint32(28,rate*2,true);v.setUint16(32,2,true);v.setUint16(34,16,true);w(36,'data');v.setUint32(40,pcm.length,true);
+ const out=new Uint8Array(44+pcm.length);out.set(new Uint8Array(h),0);out.set(pcm,44);return out;
+}
+async function wavToOgg(wavBytes){
+ await loadOggEncoder();
+ const AudioCtx=window.AudioContext||window.webkitAudioContext;
+ if(!AudioCtx)throw new Error('Este navegador no admite decodificación de audio.');
+ const ctx=new AudioCtx();
+ try{
+  const buffer=await ctx.decodeAudioData(wavBytes.buffer.slice(wavBytes.byteOffset,wavBytes.byteOffset+wavBytes.byteLength));
+  const channels=[];
+  for(let c=0;c<buffer.numberOfChannels;c++)channels.push(buffer.getChannelData(c));
+  const encoder=new OggVorbisEncoder(buffer.sampleRate,buffer.numberOfChannels,0.45);
+  encoder.encode(channels);
+  return encoder.finish('audio/ogg');
+ }finally{await ctx.close()}
+}
+async function geminiSpeak(text,voice,key,model,style){
+ const body={
+  model,
+  input:[{type:'user_input',content:[{type:'text',text,annotations:[{type:'speech_metadata',style}]}]}],
+  response_format:{type:'audio'},
+  generation_config:{speech_config:[{voice}]}
+ };
+ let res,data;
+ for(let attempt=0;attempt<5;attempt++){
+  res=await fetch('https://generativelanguage.googleapis.com/v1beta/interactions',{
+   method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':key},body:JSON.stringify(body)
+  });
+  data=await res.json().catch(()=>({}));
+  if(res.status===429||res.status>=500){
+   const info=String(data.error?.message||'')+' '+JSON.stringify(data.error?.details||'');
+   if(res.status===429&&/per\s?day|PerDay|daily/i.test(info))throw new Error('Se agotó la cuota DIARIA de Gemini (plan gratis). Los audios ya hechos se conservan: pulsa «Generar» otra vez mañana (se reinicia a medianoche, hora del Pacífico) o activa facturación en Google AI Studio.');
+   const m=info.match(/(?:retry in|retryDelay"?:?\s*"?)\s*([\d.]+)s/i);
+   const wait=Math.min(90,Math.max(5,m?Number(m[1])+2:15*(attempt+1)));
+   showStatus('tts-status','Gemini pidió esperar (límite por minuto). Reintentando en '+Math.ceil(wait)+' s…');
+   await sleep(wait*1000);continue;
+  }
+  break;
+ }
+ if(!res.ok)throw new Error(data.error?.message||'Gemini respondió HTTP '+res.status);
+ let audio=data.output_audio?.data;
+ if(!audio&&Array.isArray(data.steps)){
+  for(const step of data.steps)if(step.type==='model_output'&&Array.isArray(step.content)){
+   for(const part of step.content)if(part.type==='audio'&&part.data)audio=part.data;
+  }
+ }
+ if(!audio)throw new Error('Gemini no devolvió audio. Comprueba que tu clave tenga acceso al modelo TTS.');
+ const bytes=base64ToBytes(audio);
+ const isRiff=bytes[0]===0x52&&bytes[1]===0x49&&bytes[2]===0x46&&bytes[3]===0x46;
+ return isRiff?bytes:pcmToWav(bytes);
+}
+function addVoiceSoundDefinitions(lines,prefix){
+ const defsPath=prefix+'sounds/sound_definitions.json';
+ let defs={format_version:'1.14.0',sound_definitions:{}};
+ if(isText(addonFiles[defsPath])){
+  try{defs=JSON.parse(addonFiles[defsPath]);defs.sound_definitions=defs.sound_definitions||{}}
+  catch{throw new Error('El archivo '+defsPath+' ya existe pero su JSON está dañado. Corrígelo antes de añadir voces.')}
+ }
+ const map=[];
+ lines.forEach((line,i)=>{
+  const n=String(i+1).padStart(3,'0'),event='villager_voice.dialogue_'+n;
+  defs.sound_definitions[event]={category:'neutral',sounds:[{name:'sounds/voices/dialogue_'+n,volume:1.0}]};
+  map.push({id:i+1,event,file:'sounds/voices/dialogue_'+n+'.ogg',text:line,voice:i%2===0?$('tts-voice-a').value:$('tts-voice-b').value});
+ });
+ addonFiles[defsPath]=JSON.stringify(defs,null,2);
+ addonFiles[prefix+'sounds/villager_voice_map.json']=JSON.stringify({note:'El Behavior Pack debe ejecutar playsound para el evento correspondiente.',dialogues:map},null,2);
+}
+const ttsDone={};
+$('generate-voices').onclick=async()=>{
+ const key=$('gemini-api-key').value.trim(),lines=$('tts-dialogues').value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
+ if(!key){alert('Pega tu clave API de Gemini.');return}
+ if(!lines.length){alert('Añade al menos un diálogo, uno por línea.');return}
+ if(lines.length>100){alert('Por seguridad, genera un máximo de 100 audios por tanda.');return}
+ const btn=$('generate-voices');btn.disabled=true;btn.textContent='Preparando voces…';
+ try{
+  saveCurrent(false);
+  const prefix=findRPPrefix();
+  if(prefix===null)throw new Error('Este proyecto no tiene Resource Pack. Crea uno para poder incluir los archivos OGG.');
+  const model=$('tts-model').value,style=$('tts-style').value;
+  await loadOggEncoder();
+  const gap=Math.max(0,Number($('tts-gap').value)||60);let inBatch=0;
+  for(let i=0;i<lines.length;i++){
+   const n=String(i+1).padStart(3,'0'),voice=i%2===0?$('tts-voice-a').value:$('tts-voice-b').value;
+   const outPath=prefix+'sounds/voices/dialogue_'+n+'.ogg';
+   if(ttsDone[i]===lines[i]&&addonFiles[outPath])continue;
+   if(inBatch>=3){for(let s=gap;s>0;s--){showStatus('tts-status',`Tanda de 3 audios lista (${i}/${lines.length}). Esperando ${s} s antes de la siguiente tanda…`);await sleep(1000)}inBatch=0}
+   showStatus('tts-status',`Generando audio ${i+1}/${lines.length}: voz ${voice}`);
+   inBatch++;
+   let wav;
+   try{wav=await geminiSpeak(lines[i],voice,key,model,style)}
+   catch(e){throw new Error('Diálogo '+(i+1)+' falló: '+e.message)}
+   let ogg;
+   try{ogg=await wavToOgg(wav)}catch(e){throw new Error('Diálogo '+(i+1)+': no se pudo convertir a OGG ('+e.message+')')}
+   addonFiles[outPath]=new Uint8Array(await ogg.arrayBuffer());
+   ttsDone[i]=lines[i];
+   addVoiceSoundDefinitions(lines.slice(0,i+1),prefix);
+   renderTabs();
+  }
+  addVoiceSoundDefinitions(lines,prefix);
+  renderTabs();
+  showStatus('tts-status','¡Listo! Se generaron '+lines.length+' archivos OGG Vorbis y se añadieron al Resource Pack. Revisa sounds/villager_voice_map.json para conectar cada evento con la lógica de diálogo.','good');
+ }catch(e){showStatus('tts-status','Error al generar voces: '+e.message,'error')}
+ finally{btn.disabled=false;btn.textContent='Generar voces OGG y añadir al pack'}
+};
+
+function renderProjects(){const list=$('project-list');list.innerHTML='';projects.forEach(p=>{const d=document.createElement('div');d.className='chat-item';const st=document.createElement('strong');st.textContent=p.name;const sm=document.createElement('small');sm.textContent=p.summary||'Proyecto guardado';d.append(st,sm);d.onclick=()=>{if(!p.files||!Object.keys(p.files).length){alert('Este proyecto está vacío.');return}addonFiles={...p.files};currentFile='';refreshPackChoices();renderTabs();openFile(Object.keys(addonFiles).sort()[0]);updateTtsVisibility(projectHasAudio());generator.style.display='none';editor.style.display='block';sidebar.classList.remove('open')};list.appendChild(d)})}
+$('new-project').onclick=()=>{const name=prompt('Nombre del nuevo proyecto:');if(!name?.trim())return;projects.push({name:name.trim(),summary:'Proyecto nuevo',files:{}});persistProjects();renderProjects();sidebar.classList.remove('open')};
+updateTtsVisibility(false);
+renderProjects();
+})();
+</script>
+</body>
+</html>
