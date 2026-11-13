@@ -70,6 +70,13 @@ textarea{resize:vertical}.prompt{min-height:150px}.row{display:flex;gap:8px}.row
 <div class="actions"><button class="success" id="save-file">Guardar archivo</button><button class="secondary" id="save-project">Guardar proyecto</button><button class="secondary" id="back">Volver al generador</button><button class="primary" id="pack-download">Empaquetar y descargar</button></div>
 <div id="editor-status" class="status"></div><div class="actions"><button class="secondary" id="validate-addon">🔎 Revisar addon</button></div>
 <div id="validation-report" class="validation-box hidden" aria-live="polite"></div>
+<div class="validation-box" style="margin-top:22px">
+ <h3>✨ Editar el addon</h3>
+ <div class="tip">Describe qué quieres cambiar o añadir y la IA modificará los archivos del addon. Puedes deshacer el último cambio. También puedes editar a mano cualquier archivo en las pestañas de arriba.</div>
+ <textarea id="ai-edit-prompt" style="min-height:110px;margin-top:12px" placeholder="Ejemplo: haz que el aldeano sea más rápido y añade una nueva animación al saludar."></textarea>
+ <div class="actions"><button class="primary" id="ai-edit" type="button">✨ Aplicar cambio con IA</button><button class="secondary" id="undo-edit" type="button">↩️ Deshacer último cambio</button></div>
+ <div class="actions"><button class="secondary" id="new-file" type="button">➕ Nuevo archivo</button><button class="danger" id="delete-file" type="button">🗑️ Eliminar archivo actual</button></div>
+</div>
 <div id="pack-choice-wrap" class="pack-select hidden"><label for="pack-choice">Pack que quieres exportar como .mcpack</label><select id="pack-choice"></select><div class="tip">Si tu addon tiene Behavior Pack y Resource Pack, exporta cada uno por separado como .mcpack o descarga el conjunto como .mcaddon.</div></div>
 
 <div class="validation-box" id="tts-panel" style="margin-top:22px">
@@ -472,20 +479,18 @@ $('pack-download').onclick=async()=>{
   const check=validateAddon();if(check.errors)throw new Error('La revisión encontró errores. Corrígelos antes de empaquetar.');
   const ext=$('pack-type').value,manifests=getManifestEntries();if(!manifests.length)throw new Error('No hay manifest.json.');
   const makePackZip=async(manifestPath)=>{const prefix=manifestPath.includes('/')?manifestPath.slice(0,manifestPath.lastIndexOf('/')+1):'',zip=new JSZip();let count=0;for(const [path,content] of Object.entries(addonFiles)){if(path.startsWith(prefix)){const relative=path.slice(prefix.length);if(relative){zip.file(relative,content);count++}}}if(!count||!zip.file('manifest.json'))throw new Error('El pack '+manifestPath+' no contiene manifest.json en su raíz.');return await zip.generateAsync({type:'blob',compression:'DEFLATE',compressionOptions:{level:6}})};
+  const addPackFolder=(zip,mp,folder)=>{const pre=mp.includes('/')?mp.slice(0,mp.lastIndexOf('/')+1):'';let c=0;for(const [path,content] of Object.entries(addonFiles)){if(path.startsWith(pre)){const rel=path.slice(pre.length);if(rel){zip.file(folder+'/'+rel,content);c++}}}if(!c)throw new Error('El pack '+mp+' está vacío.')};
   const packLabel=(p,i)=>{try{const t=(JSON.parse(addonFiles[p]).modules||[]).map(x=>x.type);return t.includes('resources')?'ResourcePack':(t.includes('data')||t.includes('script'))?'BehaviorPack':'Pack'+(i+1)}catch{return 'Pack'+(i+1)}};
   const saveBlob=(b,name)=>{const a=document.createElement('a'),u=URL.createObjectURL(b);a.href=u;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),4000)};
   if(ext==='mcpack'&&manifests.length>1&&$('pack-choice').value==='__all__'){
    const combined=new JSZip(),usedNames=new Set();
-   for(let i=0;i<manifests.length;i++){
-    let name=packLabel(manifests[i],i);if(usedNames.has(name))name+=(i+1);usedNames.add(name);
-    combined.file(name+'.mcpack',await makePackZip(manifests[i]));
-   }
+   manifests.forEach((mp,i)=>{let name=packLabel(mp,i);if(usedNames.has(name))name+=(i+1);usedNames.add(name);addPackFolder(combined,mp,name)});
    saveBlob(await combined.generateAsync({type:'blob',compression:'DEFLATE',compressionOptions:{level:6}}),'Addon_Bedrock.mcaddon');
    showStatus('editor-status','Se descargó Addon_Bedrock.mcaddon con Behavior Pack y Resource Pack juntos. Ábrelo con Minecraft para importar ambos.','good');
    return;
   }
   let blob;if(ext==='mcpack'){const selected=manifests.length>1?$('pack-choice').value:manifests[0];if(!selected)throw new Error('Selecciona el pack.');blob=await makePackZip(selected)}
-  else{const zip=new JSZip();for(let i=0;i<manifests.length;i++){const m=JSON.parse(addonFiles[manifests[i]]),types=(m.modules||[]).map(x=>x.type),label=types.includes('resources')?'ResourcePack':types.includes('data')||types.includes('script')?'BehaviorPack':'Pack'+(i+1);zip.file(label+'.mcpack',await makePackZip(manifests[i]))}blob=await zip.generateAsync({type:'blob',compression:'DEFLATE',compressionOptions:{level:6}})}
+  else{const zip=new JSZip();for(let i=0;i<manifests.length;i++){const m=JSON.parse(addonFiles[manifests[i]]),types=(m.modules||[]).map(x=>x.type),label=types.includes('resources')?'ResourcePack':types.includes('data')||types.includes('script')?'BehaviorPack':'Pack'+(i+1);addPackFolder(zip,manifests[i],label)}blob=await zip.generateAsync({type:'blob',compression:'DEFLATE',compressionOptions:{level:6}})}
   const a=document.createElement('a'),url=URL.createObjectURL(blob);a.href=url;a.download='Addon_Bedrock.'+ext;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),2000);showStatus('editor-status','Paquete creado. Importa y prueba el addon en un mundo de prueba.','good');
  }catch(e){showStatus('editor-status','Error al empaquetar: '+e.message,'error')}
  finally{btn.disabled=false;btn.textContent='Empaquetar y descargar'}
@@ -651,6 +656,67 @@ $('generate-voices').onclick=async()=>{
   showStatus('tts-status','¡Listo! Se generaron '+lines.length+' archivos OGG Vorbis y se añadieron al Resource Pack. Revisa sounds/villager_voice_map.json para conectar cada evento con la lógica de diálogo.','good');
  }catch(e){showStatus('tts-status','Error al generar voces: '+e.message,'error')}
  finally{btn.disabled=false;btn.textContent='Generar voces OGG y añadir al pack'}
+};
+
+// ---------------- Edición del addon ----------------
+let lastBackup=null;
+function showFirstFile(){const first=Object.keys(addonFiles).sort()[0];currentFile='';renderTabs();refreshPackChoices();if(first)openFile(first);else{$('json-editor').value='';$('current-file-name').textContent='Archivo'}}
+$('new-file').onclick=()=>{
+ saveCurrent(false);
+ const n=prompt('Ruta del nuevo archivo (ej. BehaviorPack/entities/mi_mob.json):');if(!n?.trim())return;
+ const clean=n.trim().replace(/\\/g,'/').replace(/^\/+/,'').replace(/\.\.\//g,'');
+ if(addonFiles[clean]!==undefined){alert('Ese archivo ya existe.');return}
+ lastBackup={...addonFiles};addonFiles[clean]='';renderTabs();refreshPackChoices();openFile(clean);
+};
+$('delete-file').onclick=()=>{
+ if(!currentFile)return;
+ if(!confirm('¿Eliminar '+currentFile+'?'))return;
+ lastBackup={...addonFiles};delete addonFiles[currentFile];showFirstFile();
+ showStatus('editor-status','Archivo eliminado. Puedes deshacerlo con «Deshacer último cambio».','good');
+};
+$('undo-edit').onclick=()=>{
+ if(!lastBackup){showStatus('editor-status','No hay nada que deshacer.','error');return}
+ addonFiles=lastBackup;lastBackup=null;showFirstFile();showStatus('editor-status','Último cambio deshecho.','good');
+};
+const EDIT_SYSTEM='Eres desarrollador experto de Add-Ons para Minecraft Bedrock. Recibes los archivos actuales de un addon y una instrucción de cambio. Devuelves ÚNICAMENTE JSON válido con esta forma: {"files":{"ruta":"contenido completo del archivo"},"delete":["ruta"]}. En "files" pon SOLO los archivos nuevos o modificados, con su contenido COMPLETO (no fragmentos). No repitas archivos sin cambios. No cambies UUID ni versiones de los manifest salvo que sea imprescindible. JSON estricto en los .json, sin comentarios ni comas finales. No inventes componentes/APIs ni archivos binarios. Sin Markdown.';
+$('ai-edit').onclick=async()=>{
+ const key=$('api-key').value.trim(),instr=$('ai-edit-prompt').value.trim();
+ if(!key){alert('Falta la clave API de Groq (se pone en el generador).');return}
+ if(!instr){alert('Escribe qué quieres cambiar.');return}
+ saveCurrent(false);
+ const btn=$('ai-edit');btn.disabled=true;btn.textContent='Editando…';
+ try{
+  if(!$('model-select').dataset.model&&!await loadAvailableModels(true))return;
+  let budget=24000;const omitted=new Set(),parts=[];
+  for(const [p,c] of Object.entries(addonFiles).sort()){
+   if(!isText(c))continue;
+   if(c.length<=budget){budget-=c.length;parts.push('=== '+p+' ===\n'+c)}else omitted.add(p);
+  }
+  const prompt=`Archivos actuales del addon:\n${parts.join('\n\n')}${omitted.size?'\n\nArchivos omitidos por tamaño (NO los modifiques ni los sobrescribas): '+[...omitted].join(', '):''}\n\nCambio solicitado: ${instr}\n\nDevuelve solo el JSON {"files":{...},"delete":[...]}.`;
+  showStatus('editor-status','Pidiendo los cambios a Groq…');
+  const raw=await callGroq(key,prompt,{system:EDIT_SYSTEM,user:prompt,maxTokens:12000,validate:r=>{const o=extractJSON(r);if(!o.files&&!o.delete)throw new Error('falta files o delete')}});
+  const obj=extractJSON(raw);
+  const changed=obj.files&&typeof obj.files==='object'&&Object.keys(obj.files).length?normalizeFiles(obj.files):{};
+  const dels=Array.isArray(obj.delete)?obj.delete.filter(x=>typeof x==='string'):[];
+  const backup={...addonFiles};
+  let n=0;
+  for(const [p,c] of Object.entries(changed)){
+   if(omitted.has(p)||(addonFiles[p]!==undefined&&!isText(addonFiles[p])))continue;
+   addonFiles[p]=c;n++;
+  }
+  for(const p0 of dels){
+   const p=p0.replace(/\\/g,'/').replace(/^\/+/,'');
+   if(isText(addonFiles[p])&&!omitted.has(p)){delete addonFiles[p];n++}
+  }
+  if(!n){addonFiles=backup;throw new Error('La IA no hizo ningún cambio. Intenta explicarlo con más detalle.')}
+  try{applyAchievementSetting(addonFiles)}
+  catch(e){addonFiles=backup;throw new Error('Los cambios dejaban el manifest dañado y se descartaron: '+e.message)}
+  lastBackup=backup;
+  const keep=currentFile;showFirstFile();if(addonFiles[keep]!==undefined)openFile(keep);
+  $('ai-edit-prompt').value='';
+  showStatus('editor-status',`Listo: se aplicaron ${n} cambio(s) de archivo. Revisa el resultado y pulsa «Revisar addon». Si no te gusta, usa «Deshacer último cambio».`,'good');
+ }catch(e){showStatus('editor-status','Error al editar con IA: '+e.message,'error')}
+ finally{btn.disabled=false;btn.textContent='✨ Aplicar cambio con IA'}
 };
 
 function renderProjects(){const list=$('project-list');list.innerHTML='';projects.forEach(p=>{const d=document.createElement('div');d.className='chat-item';const st=document.createElement('strong');st.textContent=p.name;const sm=document.createElement('small');sm.textContent=p.summary||'Proyecto guardado';d.append(st,sm);d.onclick=()=>{if(!p.files||!Object.keys(p.files).length){alert('Este proyecto está vacío.');return}addonFiles={...p.files};currentFile='';refreshPackChoices();renderTabs();openFile(Object.keys(addonFiles).sort()[0]);updateTtsVisibility(projectHasAudio());generator.style.display='none';editor.style.display='block';sidebar.classList.remove('open')};list.appendChild(d)})}
