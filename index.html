@@ -439,7 +439,7 @@ $('save-project').onclick=()=>{
 };
 $('back').onclick=()=>{saveCurrent(false);editor.style.display='none';generator.style.display='block';hideStatus('editor-status')};
 function getManifestEntries(){return Object.keys(addonFiles).filter(p=>p.toLowerCase().split('/').pop()==='manifest.json').sort()}
-function refreshPackChoices(){const manifests=getManifestEntries(),wrap=$('pack-choice-wrap'),sel=$('pack-choice');sel.innerHTML='';if(manifests.length>1){const all=document.createElement('option');all.value='__all__';all.textContent='Todos juntos en un solo .mcpack';sel.appendChild(all)}manifests.forEach(path=>{const o=document.createElement('option');o.value=path;o.textContent=path;sel.appendChild(o)});wrap.classList.toggle('hidden',manifests.length<2)}
+function refreshPackChoices(){const manifests=getManifestEntries(),wrap=$('pack-choice-wrap'),sel=$('pack-choice');sel.innerHTML='';if(manifests.length>1){const all=document.createElement('option');all.value='__all__';all.textContent='Todos juntos (se descarga como .mcaddon)';sel.appendChild(all)}manifests.forEach(path=>{const o=document.createElement('option');o.value=path;o.textContent=path;sel.appendChild(o)});wrap.classList.toggle('hidden',manifests.length<2)}
 function addIssue(list,type,message){list.push({type,message})}
 function validateAddon(){
  saveCurrent(false);const issues=[],parsed=new Map(),uuidSeen=new Map(),paths=Object.keys(addonFiles);
@@ -476,13 +476,12 @@ $('pack-download').onclick=async()=>{
   const saveBlob=(b,name)=>{const a=document.createElement('a'),u=URL.createObjectURL(b);a.href=u;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),4000)};
   if(ext==='mcpack'&&manifests.length>1&&$('pack-choice').value==='__all__'){
    const combined=new JSZip(),usedNames=new Set();
-   manifests.forEach((mp,i)=>{
-    let folder=packLabel(mp,i);if(usedNames.has(folder))folder+=(i+1);usedNames.add(folder);
-    const pre=mp.includes('/')?mp.slice(0,mp.lastIndexOf('/')+1):'';
-    for(const [path,content] of Object.entries(addonFiles)){if(path.startsWith(pre)){const rel=path.slice(pre.length);if(rel)combined.file(folder+'/'+rel,content)}}
-   });
-   saveBlob(await combined.generateAsync({type:'blob',compression:'DEFLATE',compressionOptions:{level:6}}),'Addon_Bedrock.mcpack');
-   showStatus('editor-status','Se descargó Addon_Bedrock.mcpack con '+manifests.length+' packs (Behavior y Resource) juntos. Si Minecraft solo importa uno, usa el formato .mcaddon.','good');
+   for(let i=0;i<manifests.length;i++){
+    let name=packLabel(manifests[i],i);if(usedNames.has(name))name+=(i+1);usedNames.add(name);
+    combined.file(name+'.mcpack',await makePackZip(manifests[i]));
+   }
+   saveBlob(await combined.generateAsync({type:'blob',compression:'DEFLATE',compressionOptions:{level:6}}),'Addon_Bedrock.mcaddon');
+   showStatus('editor-status','Se descargó Addon_Bedrock.mcaddon con Behavior Pack y Resource Pack juntos. Ábrelo con Minecraft para importar ambos.','good');
    return;
   }
   let blob;if(ext==='mcpack'){const selected=manifests.length>1?$('pack-choice').value:manifests[0];if(!selected)throw new Error('Selecciona el pack.');blob=await makePackZip(selected)}
