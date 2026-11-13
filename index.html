@@ -326,6 +326,22 @@ function applyAchievementSetting(files){
    if(typeof oldUUID==='string'&&!uuidMap.has(oldUUID.toLowerCase()))uuidMap.set(oldUUID.toLowerCase(),fresh);
   }
  }
+ // Reparar dependencias de packs: deben apuntar al header.uuid de OTRO pack del proyecto.
+ const headerUUIDs=new Map(manifests.map(({path,manifest})=>[manifest.header.uuid.toLowerCase(),path]));
+ for(const {path,manifest} of manifests){
+  if(!Array.isArray(manifest.dependencies))continue;
+  const others=manifests.filter(x=>x.path!==path);
+  manifest.dependencies=manifest.dependencies.filter(dep=>{
+   if(!dep||typeof dep!=='object')return false;
+   if(typeof dep.uuid!=='string')return true; // p. ej. module_name de @minecraft/server
+   if(uuidMap.has(dep.uuid.toLowerCase()))dep.uuid=uuidMap.get(dep.uuid.toLowerCase());
+   const owner=headerUUIDs.get(dep.uuid.toLowerCase());
+   if(owner&&owner!==path)return true;
+   if(others.length===1){dep.uuid=others[0].manifest.header.uuid;dep.version=others[0].manifest.header.version;return true}
+   return false; // apunta a un pack que no existe: se elimina
+  });
+  if(!manifest.dependencies.length)delete manifest.dependencies;
+ }
  const reorder=(manifest,meta)=>{delete manifest.metadata;if(meta&&Object.keys(meta).length)manifest.metadata=meta};
  for(const {path,manifest} of manifests){
   const isBP=(manifest.modules||[]).some(m=>['data','script','javascript'].includes(String(m.type||'').toLowerCase()))||/behavior|(^|\/)bp/i.test(path);
